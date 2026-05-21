@@ -33,6 +33,29 @@ def split_cell_text(psz_cell_text: str) -> list[str]:
     return list_split_lines
 
 
+def normalize_line_breaks_and_trim(psz_text: str) -> str:
+    """Normalize line breaks and trim spaces for strict matching."""
+    psz_normalized_text: str = psz_text.replace("\r\n", "\n").strip()
+    return psz_normalized_text
+
+
+def should_skip_row_by_first_column(list_source_row: list[str], list_skip_keywords: list[str]) -> bool:
+    """Return True when first-column text matches any normalized skip keyword exactly."""
+    if len(list_source_row) == 0:
+        return False
+
+    psz_first_column_text: str = normalize_line_breaks_and_trim(list_source_row[0])
+    if psz_first_column_text == "":
+        return False
+
+    for psz_skip_keyword in list_skip_keywords:
+        psz_normalized_skip_keyword: str = normalize_line_breaks_and_trim(psz_skip_keyword)
+        if psz_first_column_text == psz_normalized_skip_keyword:
+            return True
+
+    return False
+
+
 def normalize_rows_with_multiline_and_carry_forward(list_source_rows: list[list[str]]) -> list[list[str]]:
     """Expand multiline cells by physical row and carry forward blank values."""
     list_normalized_rows: list[list[str]] = []
@@ -77,6 +100,8 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     obj_workbook: Any = load_workbook(filename=str(obj_excel_path), data_only=True)
     obj_active_sheet: Any = obj_workbook.active
 
+    list_skip_keywords: list[str] = ["始業前点検"]
+
     list_source_rows: list[list[str]] = []
     for obj_row in obj_active_sheet.iter_rows(values_only=True):
         list_row_values: list[str] = []
@@ -86,6 +111,10 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
             else:
                 psz_cell_text = str(obj_cell_value)
             list_row_values.append(psz_cell_text)
+
+        if should_skip_row_by_first_column(list_row_values, list_skip_keywords):
+            continue
+
         list_source_rows.append(list_row_values)
 
     list_normalized_rows: list[list[str]] = normalize_rows_with_multiline_and_carry_forward(list_source_rows)
