@@ -140,35 +140,47 @@ def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) 
         return 0
 
     if i_message == win32con.WM_PAINT:
-        obj_paint_struct: Any = win32gui.PAINTSTRUCT()
-        h_device_context, obj_paint_struct = win32gui.BeginPaint(h_window)
+        h_device_context: int | None = None
+        obj_paint_struct: Any = None
+        i_font_handle: int = 0
+        i_old_font_handle: int = 0
 
-        i_font_handle: int = create_instruction_font()
-        i_old_font_handle: int = win32gui.SelectObject(h_device_context, i_font_handle)
+        try:
+            h_device_context, obj_paint_struct = win32gui.BeginPaint(h_window)
 
-        win32gui.SetBkMode(h_device_context, win32con.TRANSPARENT)
+            i_font_handle = create_instruction_font()
+            if i_font_handle != 0:
+                i_old_font_handle = win32gui.SelectObject(h_device_context, i_font_handle)
 
-        obj_client_rect: tuple[int, int, int, int] = win32gui.GetClientRect(h_window)
-        i_margin: int = 5
-        obj_text_rect: tuple[int, int, int, int] = (
-            obj_client_rect[0] + i_margin,
-            obj_client_rect[1] + i_margin,
-            obj_client_rect[2] - i_margin,
-            obj_client_rect[3] - i_margin,
-        )
+            win32gui.SetBkMode(h_device_context, win32con.TRANSPARENT)
 
-        i_draw_text_flags: int = win32con.DT_LEFT | win32con.DT_TOP | win32con.DT_WORDBREAK
-        psz_instruction_text: str = (
-            "配車カレンダーExcel(.xlsx)をこのウインドウへドラッグ＆ドロップしてください。\n"
-            "同じフォルダにTSVファイルを作成します。\n"
-            "エラー時は _error.txt を出力します。"
-        )
+            obj_client_rect: tuple[int, int, int, int] = win32gui.GetClientRect(h_window)
+            i_margin: int = 5
+            obj_text_rect: tuple[int, int, int, int] = (
+                obj_client_rect[0] + i_margin,
+                obj_client_rect[1] + i_margin,
+                obj_client_rect[2] - i_margin,
+                obj_client_rect[3] - i_margin,
+            )
 
-        win32gui.DrawText(h_device_context, psz_instruction_text, -1, obj_text_rect, i_draw_text_flags)
+            i_draw_text_flags: int = win32con.DT_LEFT | win32con.DT_TOP | win32con.DT_WORDBREAK
+            psz_instruction_text: str = (
+                "配車カレンダーExcel(.xlsx)をこのウインドウへドラッグ＆ドロップしてください。\n"
+                "同じフォルダにTSVファイルを作成します。\n"
+                "エラー時は _error.txt を出力します。"
+            )
 
-        win32gui.SelectObject(h_device_context, i_old_font_handle)
-        win32gui.DeleteObject(i_font_handle)
-        win32gui.EndPaint(h_window, obj_paint_struct)
+            win32gui.DrawText(h_device_context, psz_instruction_text, -1, obj_text_rect, i_draw_text_flags)
+        except Exception as obj_exception:  # noqa: BLE001
+            print(f"WM_PAINT error: {obj_exception}")
+        finally:
+            if h_device_context is not None and i_font_handle != 0 and i_old_font_handle != 0:
+                win32gui.SelectObject(h_device_context, i_old_font_handle)
+            if i_font_handle != 0:
+                win32gui.DeleteObject(i_font_handle)
+            if h_device_context is not None and obj_paint_struct is not None:
+                win32gui.EndPaint(h_window, obj_paint_struct)
+
         return 0
 
     if i_message == win32con.WM_DESTROY:
