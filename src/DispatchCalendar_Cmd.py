@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 import traceback
 from pathlib import Path
@@ -26,6 +25,49 @@ def write_error_text(psz_excel_file_path: str, psz_error_message: str) -> str:
     return str(obj_error_file_path)
 
 
+def split_cell_text(psz_cell_text: str) -> list[str]:
+    """Split a single cell by line breaks; return at least one element."""
+    list_split_lines: list[str] = psz_cell_text.splitlines()
+    if len(list_split_lines) == 0:
+        return [""]
+    return list_split_lines
+
+
+def normalize_rows_with_multiline_and_carry_forward(list_source_rows: list[list[str]]) -> list[list[str]]:
+    """Expand multiline cells by physical row and carry forward blank values."""
+    list_normalized_rows: list[list[str]] = []
+    dict_last_filled_value_by_column_index: dict[int, str] = {}
+
+    for list_source_row in list_source_rows:
+        list_row_split_values: list[list[str]] = []
+        iMaxLogicalRowCount: int = 1
+
+        for psz_cell_text in list_source_row:
+            list_split_values: list[str] = split_cell_text(psz_cell_text)
+            list_row_split_values.append(list_split_values)
+            if len(list_split_values) > iMaxLogicalRowCount:
+                iMaxLogicalRowCount = len(list_split_values)
+
+        for iLogicalRowIndex in range(iMaxLogicalRowCount):
+            list_expanded_row: list[str] = []
+            for iColumnIndex, list_split_values in enumerate(list_row_split_values):
+                psz_raw_value: str = ""
+                if iLogicalRowIndex < len(list_split_values):
+                    psz_raw_value = list_split_values[iLogicalRowIndex]
+
+                if psz_raw_value == "":
+                    psz_filled_value: str = dict_last_filled_value_by_column_index.get(iColumnIndex, "")
+                else:
+                    psz_filled_value = psz_raw_value
+                    dict_last_filled_value_by_column_index[iColumnIndex] = psz_filled_value
+
+                list_expanded_row.append(psz_filled_value)
+
+            list_normalized_rows.append(list_expanded_row)
+
+    return list_normalized_rows
+
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -35,16 +77,22 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     obj_workbook: Any = load_workbook(filename=str(obj_excel_path), data_only=True)
     obj_active_sheet: Any = obj_workbook.active
 
+    list_source_rows: list[list[str]] = []
+    for obj_row in obj_active_sheet.iter_rows(values_only=True):
+        list_row_values: list[str] = []
+        for obj_cell_value in obj_row:
+            if obj_cell_value is None:
+                psz_cell_text: str = ""
+            else:
+                psz_cell_text = str(obj_cell_value)
+            list_row_values.append(psz_cell_text)
+        list_source_rows.append(list_row_values)
+
+    list_normalized_rows: list[list[str]] = normalize_rows_with_multiline_and_carry_forward(list_source_rows)
+
     with obj_tsv_file_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_tsv_file:
-        for obj_row in obj_active_sheet.iter_rows(values_only=True):
-            list_row_values: list[str] = []
-            for obj_cell_value in obj_row:
-                if obj_cell_value is None:
-                    psz_cell_text: str = ""
-                else:
-                    psz_cell_text = str(obj_cell_value)
-                list_row_values.append(psz_cell_text)
-            psz_tsv_line: str = "\t".join(list_row_values)
+        for list_normalized_row in list_normalized_rows:
+            psz_tsv_line: str = "\t".join(list_normalized_row)
             obj_tsv_file.write(psz_tsv_line + "\n")
 
     obj_workbook.close()
