@@ -48,12 +48,48 @@ def should_skip_row_by_first_column(list_source_row: list[str], list_skip_keywor
     return False
 
 
+
+
+def is_shifted_continuation_row(list_previous_row: list[str], list_current_row: list[str]) -> bool:
+    """Detect left-shifted continuation rows that should map A/B into C/D."""
+    if len(list_previous_row) < 4 or len(list_current_row) < 2:
+        return False
+
+    psz_previous_name: str = normalize_line_breaks_and_trim(list_previous_row[0])
+    psz_previous_car_number: str = normalize_line_breaks_and_trim(list_previous_row[1])
+    psz_previous_spare_car: str = normalize_line_breaks_and_trim(list_previous_row[2])
+    psz_current_first_value: str = normalize_line_breaks_and_trim(list_current_row[0])
+    psz_current_second_value: str = normalize_line_breaks_and_trim(list_current_row[1])
+
+    if psz_previous_name == "" or psz_previous_car_number == "" or psz_previous_spare_car == "":
+        return False
+
+    if psz_current_first_value == "" or psz_current_second_value == "":
+        return False
+
+    for psz_remaining_value in list_current_row[2:]:
+        if normalize_line_breaks_and_trim(psz_remaining_value) != "":
+            return False
+
+    return True
+
+
+def shift_row_to_the_right(list_current_row: list[str], iShiftCount: int) -> list[str]:
+    """Return a row shifted right by adding empty cells at the beginning."""
+    return [""] * iShiftCount + list_current_row
 def merge_continuation_rows(list_source_rows: list[list[str]]) -> list[list[str]]:
     """Merge continuation rows into previous row by joining values with newlines per column."""
     list_merged_rows: list[list[str]] = []
 
     for list_current_row in list_source_rows:
-        b_is_continuation_row: bool = len(list_merged_rows) > 0 and normalize_line_breaks_and_trim(list_current_row[0]) == ""
+        b_has_previous_row: bool = len(list_merged_rows) > 0
+        b_is_blank_first_column_continuation: bool = b_has_previous_row and normalize_line_breaks_and_trim(list_current_row[0]) == ""
+
+        list_adjusted_current_row: list[str] = list_current_row[:]
+        if b_has_previous_row and is_shifted_continuation_row(list_merged_rows[-1], list_current_row):
+            list_adjusted_current_row = shift_row_to_the_right(list_current_row, 2)
+
+        b_is_continuation_row: bool = b_is_blank_first_column_continuation or (list_adjusted_current_row is not list_current_row)
 
         if not b_is_continuation_row:
             list_merged_rows.append(list_current_row[:])
@@ -61,7 +97,7 @@ def merge_continuation_rows(list_source_rows: list[list[str]]) -> list[list[str]
 
         list_previous_row: list[str] = list_merged_rows[-1]
         i_previous_column_count: int = len(list_previous_row)
-        i_current_column_count: int = len(list_current_row)
+        i_current_column_count: int = len(list_adjusted_current_row)
         i_max_column_count: int = i_previous_column_count if i_previous_column_count > i_current_column_count else i_current_column_count
 
         if i_previous_column_count < i_max_column_count:
@@ -70,7 +106,7 @@ def merge_continuation_rows(list_source_rows: list[list[str]]) -> list[list[str]
         for iColumnIndex in range(i_max_column_count):
             psz_current_value: str = ""
             if iColumnIndex < i_current_column_count:
-                psz_current_value = list_current_row[iColumnIndex]
+                psz_current_value = list_adjusted_current_row[iColumnIndex]
 
             if normalize_line_breaks_and_trim(psz_current_value) == "":
                 continue
