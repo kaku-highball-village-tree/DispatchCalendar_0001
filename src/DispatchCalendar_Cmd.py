@@ -25,14 +25,6 @@ def write_error_text(psz_excel_file_path: str, psz_error_message: str) -> str:
     return str(obj_error_file_path)
 
 
-def split_cell_text(psz_cell_text: str) -> list[str]:
-    """Split a single cell by line breaks; return at least one element."""
-    list_split_lines: list[str] = psz_cell_text.splitlines()
-    if len(list_split_lines) == 0:
-        return [""]
-    return list_split_lines
-
-
 def normalize_line_breaks_and_trim(psz_text: str) -> str:
     """Normalize line breaks and trim spaces for strict matching."""
     psz_normalized_text: str = psz_text.replace("\r\n", "\n").strip()
@@ -56,32 +48,40 @@ def should_skip_row_by_first_column(list_source_row: list[str], list_skip_keywor
     return False
 
 
-def normalize_rows_with_multiline_expansion(list_source_rows: list[list[str]]) -> list[list[str]]:
-    """Expand multiline cells by physical row without carry-forward fill."""
-    list_normalized_rows: list[list[str]] = []
+def merge_continuation_rows(list_source_rows: list[list[str]]) -> list[list[str]]:
+    """Merge continuation rows into previous row by joining values with newlines per column."""
+    list_merged_rows: list[list[str]] = []
 
-    for list_source_row in list_source_rows:
-        list_row_split_values: list[list[str]] = []
-        iMaxLogicalRowCount: int = 1
+    for list_current_row in list_source_rows:
+        b_is_continuation_row: bool = len(list_merged_rows) > 0 and normalize_line_breaks_and_trim(list_current_row[0]) == ""
 
-        for psz_cell_text in list_source_row:
-            list_split_values: list[str] = split_cell_text(psz_cell_text)
-            list_row_split_values.append(list_split_values)
-            if len(list_split_values) > iMaxLogicalRowCount:
-                iMaxLogicalRowCount = len(list_split_values)
+        if not b_is_continuation_row:
+            list_merged_rows.append(list_current_row[:])
+            continue
 
-        for iLogicalRowIndex in range(iMaxLogicalRowCount):
-            list_expanded_row: list[str] = []
-            for iColumnIndex, list_split_values in enumerate(list_row_split_values):
-                psz_raw_value: str = ""
-                if iLogicalRowIndex < len(list_split_values):
-                    psz_raw_value = list_split_values[iLogicalRowIndex]
+        list_previous_row: list[str] = list_merged_rows[-1]
+        i_previous_column_count: int = len(list_previous_row)
+        i_current_column_count: int = len(list_current_row)
+        i_max_column_count: int = i_previous_column_count if i_previous_column_count > i_current_column_count else i_current_column_count
 
-                list_expanded_row.append(psz_raw_value)
+        if i_previous_column_count < i_max_column_count:
+            list_previous_row.extend([""] * (i_max_column_count - i_previous_column_count))
 
-            list_normalized_rows.append(list_expanded_row)
+        for iColumnIndex in range(i_max_column_count):
+            psz_current_value: str = ""
+            if iColumnIndex < i_current_column_count:
+                psz_current_value = list_current_row[iColumnIndex]
 
-    return list_normalized_rows
+            if normalize_line_breaks_and_trim(psz_current_value) == "":
+                continue
+
+            psz_previous_value: str = list_previous_row[iColumnIndex]
+            if normalize_line_breaks_and_trim(psz_previous_value) == "":
+                list_previous_row[iColumnIndex] = psz_current_value
+            else:
+                list_previous_row[iColumnIndex] = f"{psz_previous_value}\n{psz_current_value}"
+
+    return list_merged_rows
 
 
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
@@ -110,7 +110,7 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
 
         list_source_rows.append(list_row_values)
 
-    list_normalized_rows: list[list[str]] = normalize_rows_with_multiline_expansion(list_source_rows)
+    list_normalized_rows: list[list[str]] = merge_continuation_rows(list_source_rows)
 
     with obj_tsv_file_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_tsv_file:
         for list_normalized_row in list_normalized_rows:
