@@ -56,10 +56,9 @@ def should_skip_row_by_first_column(list_source_row: list[str], list_skip_keywor
     return False
 
 
-def normalize_rows_with_multiline_and_carry_forward(list_source_rows: list[list[str]]) -> list[list[str]]:
-    """Expand multiline cells by physical row and carry forward blank values."""
+def normalize_rows_with_multiline_expansion(list_source_rows: list[list[str]]) -> list[list[str]]:
+    """Expand multiline cells by physical row without carry-forward fill."""
     list_normalized_rows: list[list[str]] = []
-    dict_last_filled_value_by_column_index: dict[int, str] = {}
 
     for list_source_row in list_source_rows:
         list_row_split_values: list[list[str]] = []
@@ -78,13 +77,7 @@ def normalize_rows_with_multiline_and_carry_forward(list_source_rows: list[list[
                 if iLogicalRowIndex < len(list_split_values):
                     psz_raw_value = list_split_values[iLogicalRowIndex]
 
-                if psz_raw_value == "":
-                    psz_filled_value: str = dict_last_filled_value_by_column_index.get(iColumnIndex, "")
-                else:
-                    psz_filled_value = psz_raw_value
-                    dict_last_filled_value_by_column_index[iColumnIndex] = psz_filled_value
-
-                list_expanded_row.append(psz_filled_value)
+                list_expanded_row.append(psz_raw_value)
 
             list_normalized_rows.append(list_expanded_row)
 
@@ -117,7 +110,7 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
 
         list_source_rows.append(list_row_values)
 
-    list_normalized_rows: list[list[str]] = normalize_rows_with_multiline_and_carry_forward(list_source_rows)
+    list_normalized_rows: list[list[str]] = normalize_rows_with_multiline_expansion(list_source_rows)
 
     with obj_tsv_file_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_tsv_file:
         for list_normalized_row in list_normalized_rows:
