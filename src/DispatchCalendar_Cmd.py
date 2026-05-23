@@ -120,6 +120,14 @@ def merge_continuation_rows(list_source_rows: list[list[str]]) -> list[list[str]
     return list_merged_rows
 
 
+
+
+def escape_newlines_in_cell_text(psz_cell_text: str) -> str:
+    """Convert embedded newlines in cell text into literal \n sequences."""
+    psz_escaped_text: str = psz_cell_text.replace("\r\n", "\n").replace("\n", "\\n")
+    return psz_escaped_text
+
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -138,7 +146,7 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
             if obj_cell_value is None:
                 psz_cell_text: str = ""
             else:
-                psz_cell_text = str(obj_cell_value)
+                psz_cell_text = escape_newlines_in_cell_text(str(obj_cell_value))
             list_row_values.append(psz_cell_text)
 
         if should_skip_row_by_first_column(list_row_values, list_skip_keywords):
