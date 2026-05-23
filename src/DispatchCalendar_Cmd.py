@@ -85,11 +85,13 @@ def merge_continuation_rows(list_source_rows: list[list[str]]) -> list[list[str]
         b_has_previous_row: bool = len(list_merged_rows) > 0
         b_is_blank_first_column_continuation: bool = b_has_previous_row and normalize_line_breaks_and_trim(list_current_row[0]) == ""
 
-        list_adjusted_current_row: list[str] = list_current_row[:]
-        if b_has_previous_row and is_shifted_continuation_row(list_merged_rows[-1], list_current_row):
-            list_adjusted_current_row = shift_row_to_the_right(list_current_row, 2)
+        b_has_shift_adjustment: bool = b_has_previous_row and is_shifted_continuation_row(list_merged_rows[-1], list_current_row)
+        if b_has_shift_adjustment:
+            list_adjusted_current_row: list[str] = shift_row_to_the_right(list_current_row, 2)
+        else:
+            list_adjusted_current_row = list_current_row
 
-        b_is_continuation_row: bool = b_is_blank_first_column_continuation or (list_adjusted_current_row is not list_current_row)
+        b_is_continuation_row: bool = b_has_previous_row and (b_is_blank_first_column_continuation or b_has_shift_adjustment)
 
         if not b_is_continuation_row:
             list_merged_rows.append(list_current_row[:])
