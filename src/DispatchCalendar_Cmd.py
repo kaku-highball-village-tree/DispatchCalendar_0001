@@ -141,10 +141,10 @@ def expand_rows_by_embedded_newlines(
         list_split_cells: list[list[str]] = []
         i_max_split_count: int = 1
 
-        for psz_cell_text in list_source_row:
+        for i_column_index, psz_cell_text in enumerate(list_source_row):
             list_cell_lines: list[str] = psz_cell_text.split("\n")
             list_split_cells.append(list_cell_lines)
-            if len(list_cell_lines) > i_max_split_count:
+            if i_column_index >= i_fixed_column_count and len(list_cell_lines) > i_max_split_count:
                 i_max_split_count = len(list_cell_lines)
 
         for i_row_index in range(i_max_split_count):
