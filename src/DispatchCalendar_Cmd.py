@@ -169,41 +169,52 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
 
 def main() -> int:
     list_arguments: list[str] = sys.argv
-    if len(list_arguments) != 2:
-        psz_usage_message: str = "Usage: python DispatchCalendar_Cmd.py <excel_file_path>"
+    if len(list_arguments) < 2:
+        psz_usage_message: str = "Usage: python DispatchCalendar_Cmd.py <excel_file_path1> [excel_file_path2 ...]"
         print(psz_usage_message)
         return 1
 
-    psz_excel_file_path: str = list_arguments[1]
-    obj_excel_path: Path = Path(psz_excel_file_path)
+    list_excel_file_paths: list[str] = list_arguments[1:]
+    i_success_count: int = 0
+    i_failure_count: int = 0
 
-    if not obj_excel_path.exists() or not obj_excel_path.is_file():
-        psz_error_message: str = f"Input file not found: {psz_excel_file_path}"
-        print(psz_error_message)
-        write_error_text(psz_excel_file_path, psz_error_message)
-        return 1
+    for psz_excel_file_path in list_excel_file_paths:
+        obj_excel_path: Path = Path(psz_excel_file_path)
 
-    if obj_excel_path.suffix.lower() != ".xlsx":
-        psz_error_message = f"Only .xlsx files are supported: {psz_excel_file_path}"
-        print(psz_error_message)
-        write_error_text(psz_excel_file_path, psz_error_message)
-        return 1
+        if not obj_excel_path.exists() or not obj_excel_path.is_file():
+            psz_error_message: str = f"Input file not found: {psz_excel_file_path}"
+            print(psz_error_message)
+            write_error_text(psz_excel_file_path, psz_error_message)
+            i_failure_count += 1
+            continue
 
-    try:
-        psz_created_tsv_path: str = convert_excel_to_tsv(psz_excel_file_path)
-        print(f"TSV created: {psz_created_tsv_path}")
+        if obj_excel_path.suffix.lower() != ".xlsx":
+            psz_error_message = f"Only .xlsx files are supported: {psz_excel_file_path}"
+            print(psz_error_message)
+            write_error_text(psz_excel_file_path, psz_error_message)
+            i_failure_count += 1
+            continue
+
+        try:
+            psz_created_tsv_path: str = convert_excel_to_tsv(psz_excel_file_path)
+            print(f"TSV created: {psz_created_tsv_path}")
+            i_success_count += 1
+        except Exception as obj_exception:  # noqa: BLE001
+            psz_traceback_text: str = traceback.format_exc()
+            psz_error_message = (
+                "Failed to convert Excel to TSV.\n"
+                f"Input: {psz_excel_file_path}\n"
+                f"Error: {obj_exception}\n\n"
+                f"Traceback:\n{psz_traceback_text}"
+            )
+            print(psz_error_message)
+            write_error_text(psz_excel_file_path, psz_error_message)
+            i_failure_count += 1
+
+    print(f"Summary: success={i_success_count}, failure={i_failure_count}")
+    if i_failure_count == 0:
         return 0
-    except Exception as obj_exception:  # noqa: BLE001
-        psz_traceback_text: str = traceback.format_exc()
-        psz_error_message = (
-            "Failed to convert Excel to TSV.\n"
-            f"Input: {psz_excel_file_path}\n"
-            f"Error: {obj_exception}\n\n"
-            f"Traceback:\n{psz_traceback_text}"
-        )
-        print(psz_error_message)
-        write_error_text(psz_excel_file_path, psz_error_message)
-        return 1
+    return 1
 
 
 if __name__ == "__main__":

@@ -75,15 +75,19 @@ def is_valid_excel_file_path(obj_file_path: Path) -> bool:
     return b_has_valid_extension and b_exists and b_is_file
 
 
-def run_cmd_converter(h_window: int, obj_excel_file_path: Path) -> None:
+def run_cmd_converter(h_window: int, list_excel_file_paths: list[Path]) -> None:
     """Run CMD converter via subprocess and show result message."""
     obj_cmd_script_path: Path = get_cmd_script_path()
     if not obj_cmd_script_path.exists():
         show_error_message_box(h_window, f"Cmd script not found:\n{obj_cmd_script_path}")
         return
 
-    list_subprocess_arguments: list[str] = [sys.executable, str(obj_cmd_script_path), str(obj_excel_file_path)]
-    obj_working_directory_path: Path = obj_excel_file_path.parent
+    if len(list_excel_file_paths) == 0:
+        show_error_message_box(h_window, "有効なExcelファイル(.xlsx)がありません。")
+        return
+
+    list_subprocess_arguments: list[str] = [sys.executable, str(obj_cmd_script_path)] + [str(obj_path) for obj_path in list_excel_file_paths]
+    obj_working_directory_path: Path = list_excel_file_paths[0].parent
 
     try:
         obj_completed_process: subprocess.CompletedProcess[str] = subprocess.run(
@@ -98,7 +102,7 @@ def run_cmd_converter(h_window: int, obj_excel_file_path: Path) -> None:
         return
 
     if obj_completed_process.returncode == 0:
-        show_info_message_box(h_window, "TSV変換が完了しました。")
+        show_info_message_box(h_window, f"TSV変換が完了しました。\n処理件数: {len(list_excel_file_paths)}")
         return
 
     psz_error_text: str = obj_completed_process.stderr.strip()
@@ -113,20 +117,28 @@ def run_cmd_converter(h_window: int, obj_excel_file_path: Path) -> None:
 def on_drop_files(h_window: int, h_drop: int) -> None:
     """Handle WM_DROPFILES."""
     i_file_count: int = win32api.DragQueryFile(h_drop, -1)
-    if i_file_count != 1:
-        show_error_message_box(h_window, "同時ドロップは1ファイルのみ許可されています。")
+    if i_file_count < 1:
         win32api.DragFinish(h_drop)
         return
 
-    psz_dropped_file_path: str = win32api.DragQueryFile(h_drop, 0)
+    list_excel_file_paths: list[Path] = []
+    i_invalid_file_count: int = 0
+
+    for iFileIndex in range(i_file_count):
+        psz_dropped_file_path: str = win32api.DragQueryFile(h_drop, iFileIndex)
+        obj_dropped_file_path: Path = Path(psz_dropped_file_path)
+        if is_valid_excel_file_path(obj_dropped_file_path):
+            list_excel_file_paths.append(obj_dropped_file_path)
+        else:
+            i_invalid_file_count += 1
+
     win32api.DragFinish(h_drop)
 
-    obj_dropped_file_path: Path = Path(psz_dropped_file_path)
-    if not is_valid_excel_file_path(obj_dropped_file_path):
+    if len(list_excel_file_paths) == 0:
         show_error_message_box(h_window, "Excelファイル(.xlsx)のみ受け付けます。")
         return
 
-    run_cmd_converter(h_window, obj_dropped_file_path)
+    run_cmd_converter(h_window, list_excel_file_paths)
 
 
 def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) -> int:
