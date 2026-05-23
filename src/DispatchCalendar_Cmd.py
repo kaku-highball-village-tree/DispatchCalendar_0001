@@ -140,12 +140,15 @@ def expand_rows_by_embedded_newlines(
     for list_source_row in list_source_rows:
         list_split_cells: list[list[str]] = []
         i_max_split_count: int = 1
+        b_has_multiline_non_fixed_column: bool = False
 
         for i_column_index, psz_cell_text in enumerate(list_source_row):
             list_cell_lines: list[str] = psz_cell_text.split("\n")
             list_split_cells.append(list_cell_lines)
-            if i_column_index >= i_fixed_column_count and len(list_cell_lines) > i_max_split_count:
+            if len(list_cell_lines) > i_max_split_count:
                 i_max_split_count = len(list_cell_lines)
+            if i_column_index >= i_fixed_column_count and len(list_cell_lines) > 1:
+                b_has_multiline_non_fixed_column = True
 
         for i_row_index in range(i_max_split_count):
             list_expanded_row: list[str] = []
@@ -153,7 +156,13 @@ def expand_rows_by_embedded_newlines(
             for i_column_index, list_cell_lines in enumerate(list_split_cells):
                 psz_cell_value: str = list_cell_lines[i_row_index] if i_row_index < len(list_cell_lines) else ""
 
-                if i_row_index > 0 and i_column_index < i_fixed_column_count:
+                b_should_blank_fixed_column: bool = (
+                    i_row_index > 0
+                    and b_has_multiline_non_fixed_column
+                    and i_column_index < i_fixed_column_count
+                    and len(list_cell_lines) == 1
+                )
+                if b_should_blank_fixed_column:
                     psz_cell_value = ""
 
                 list_expanded_row.append(psz_cell_value)
