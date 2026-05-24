@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sys
 import traceback
+import re
 from pathlib import Path
 from typing import Any
 
@@ -172,6 +173,33 @@ def expand_rows_by_embedded_newlines(
     return list_expanded_rows
 
 
+def normalize_file_stem_for_step_output(psz_file_stem: str) -> str:
+    """Replace half/full-width spaces in file stem with underscore."""
+    return re.sub(r"[ \u3000]+", "_", psz_file_stem)
+
+
+def create_step0001_tsv_from_tsv(psz_tsv_file_path: str) -> str:
+    """Create step0001 TSV by removing spare-car column from the generated TSV."""
+    obj_tsv_file_path: Path = Path(psz_tsv_file_path)
+    psz_normalized_stem: str = normalize_file_stem_for_step_output(obj_tsv_file_path.stem)
+    obj_step_tsv_path: Path = obj_tsv_file_path.with_name(f"{psz_normalized_stem}_step0001.tsv")
+
+    list_output_lines: list[str] = []
+    with obj_tsv_file_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        for psz_line in obj_input_file:
+            psz_line_without_newline: str = psz_line.rstrip("\r\n")
+            list_columns: list[str] = psz_line_without_newline.split("\t")
+            if len(list_columns) >= 3:
+                del list_columns[2]
+            list_output_lines.append("\t".join(list_columns))
+
+    with obj_step_tsv_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step_tsv_path)
+
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -242,6 +270,8 @@ def main() -> int:
         try:
             psz_created_tsv_path: str = convert_excel_to_tsv(psz_excel_file_path)
             print(f"TSV created: {psz_created_tsv_path}")
+            psz_created_step_tsv_path: str = create_step0001_tsv_from_tsv(psz_created_tsv_path)
+            print(f"Step TSV created: {psz_created_step_tsv_path}")
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
             psz_traceback_text: str = traceback.format_exc()
