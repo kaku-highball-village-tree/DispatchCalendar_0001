@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sys
 import traceback
+import re
 from pathlib import Path
 from typing import Any
 
@@ -125,9 +126,78 @@ def merge_continuation_rows(list_source_rows: list[list[str]]) -> list[list[str]
 
 
 def escape_newlines_in_cell_text(psz_cell_text: str) -> str:
-    """Convert embedded newlines in cell text into literal \n sequences."""
-    psz_escaped_text: str = psz_cell_text.replace("\r\n", "\n").replace("\n", "\\n")
-    return psz_escaped_text
+    """Normalize embedded newlines in cell text."""
+    psz_normalized_text: str = psz_cell_text.replace("\r\n", "\n").replace("\r", "\n")
+    return psz_normalized_text
+
+
+def expand_rows_by_embedded_newlines(
+    list_source_rows: list[list[str]],
+    i_fixed_column_count: int = 3,
+) -> list[list[str]]:
+    """Expand embedded newlines into physical TSV rows while blanking fixed leading columns on continuation lines."""
+    list_expanded_rows: list[list[str]] = []
+
+    for list_source_row in list_source_rows:
+        list_split_cells: list[list[str]] = []
+        i_max_split_count: int = 1
+        b_has_multiline_non_fixed_column: bool = False
+
+        for i_column_index, psz_cell_text in enumerate(list_source_row):
+            list_cell_lines: list[str] = psz_cell_text.split("\n")
+            list_split_cells.append(list_cell_lines)
+            if len(list_cell_lines) > i_max_split_count:
+                i_max_split_count = len(list_cell_lines)
+            if i_column_index >= i_fixed_column_count and len(list_cell_lines) > 1:
+                b_has_multiline_non_fixed_column = True
+
+        for i_row_index in range(i_max_split_count):
+            list_expanded_row: list[str] = []
+
+            for i_column_index, list_cell_lines in enumerate(list_split_cells):
+                psz_cell_value: str = list_cell_lines[i_row_index] if i_row_index < len(list_cell_lines) else ""
+
+                b_should_blank_fixed_column: bool = (
+                    i_row_index > 0
+                    and b_has_multiline_non_fixed_column
+                    and i_column_index < i_fixed_column_count
+                    and len(list_cell_lines) == 1
+                )
+                if b_should_blank_fixed_column:
+                    psz_cell_value = ""
+
+                list_expanded_row.append(psz_cell_value)
+
+            list_expanded_rows.append(list_expanded_row)
+
+    return list_expanded_rows
+
+
+def normalize_file_stem_for_step_output(psz_file_stem: str) -> str:
+    """Replace half/full-width spaces in file stem with underscore."""
+    return re.sub(r"[ \u3000]+", "_", psz_file_stem)
+
+
+def create_step0001_tsv_from_tsv(psz_tsv_file_path: str) -> str:
+    """Create step0001 TSV by removing spare-car column from the generated TSV."""
+    obj_tsv_file_path: Path = Path(psz_tsv_file_path)
+    psz_normalized_stem: str = normalize_file_stem_for_step_output(obj_tsv_file_path.stem)
+    obj_step_tsv_path: Path = obj_tsv_file_path.with_name(f"{psz_normalized_stem}_step0001.tsv")
+
+    list_output_lines: list[str] = []
+    with obj_tsv_file_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        for psz_line in obj_input_file:
+            psz_line_without_newline: str = psz_line.rstrip("\r\n")
+            list_columns: list[str] = psz_line_without_newline.split("\t")
+            if len(list_columns) >= 3:
+                del list_columns[2]
+            list_output_lines.append("\t".join(list_columns))
+
+    with obj_step_tsv_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step_tsv_path)
 
 
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
@@ -158,8 +228,10 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
 
     list_normalized_rows: list[list[str]] = merge_continuation_rows(list_source_rows)
 
+    list_expanded_rows: list[list[str]] = expand_rows_by_embedded_newlines(list_normalized_rows)
+
     with obj_tsv_file_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_tsv_file:
-        for list_normalized_row in list_normalized_rows:
+        for list_normalized_row in list_expanded_rows:
             psz_tsv_line: str = "\t".join(list_normalized_row)
             obj_tsv_file.write(psz_tsv_line + "\n")
 
@@ -198,6 +270,8 @@ def main() -> int:
         try:
             psz_created_tsv_path: str = convert_excel_to_tsv(psz_excel_file_path)
             print(f"TSV created: {psz_created_tsv_path}")
+            psz_created_step_tsv_path: str = create_step0001_tsv_from_tsv(psz_created_tsv_path)
+            print(f"Step TSV created: {psz_created_step_tsv_path}")
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
             psz_traceback_text: str = traceback.format_exc()
