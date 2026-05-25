@@ -9,6 +9,7 @@ import sys
 import traceback
 import re
 import json
+import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -675,6 +676,94 @@ def create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
 
     return i_success_count, i_skip_count
 
+
+def delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) -> tuple[int, int]:
+    """Delete matching events from step0007 TSV; skip invalid rows and write *_error.txt."""
+    obj_step0007_path: Path = Path(psz_step0007_tsv_path)
+    with obj_step0007_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        return 0, 0
+
+    list_header_columns: list[str] = list_lines[0].split("\t")
+    for psz_required_column in ["title_text", "body_text", "work_date_iso"]:
+        if psz_required_column not in list_header_columns:
+            raise ValueError(f"step0007 TSV must include {psz_required_column} column")
+
+    i_title_index: int = list_header_columns.index("title_text")
+    i_body_index: int = list_header_columns.index("body_text")
+    i_work_date_iso_index: int = list_header_columns.index("work_date_iso")
+
+    obj_service = build("calendar", "v3", credentials=get_google_credentials())
+
+    i_deleted_count: int = 0
+    i_skip_count: int = 0
+    list_skip_messages: list[str] = []
+
+    for i_line_number, psz_line in enumerate(list_lines[1:], start=2):
+        list_columns: list[str] = psz_line.split("\t")
+        if len(list_columns) <= max(i_title_index, i_body_index, i_work_date_iso_index):
+            i_skip_count += 1
+            list_skip_messages.append(f"line={i_line_number}, reason=required columns missing in row")
+            continue
+
+        psz_title: str = list_columns[i_title_index].strip()
+        psz_body: str = list_columns[i_body_index].replace("\\n", "\n").strip()
+        psz_work_date_iso: str = list_columns[i_work_date_iso_index].strip()
+
+        if psz_title == "" or psz_work_date_iso == "":
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason=title_text/work_date_iso is empty, work_date_iso={psz_work_date_iso}"
+            )
+            continue
+
+        try:
+            if "T" in psz_work_date_iso:
+                obj_start_datetime: datetime = datetime.fromisoformat(psz_work_date_iso)
+                obj_time_min: datetime = obj_start_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
+            else:
+                obj_time_min = datetime.strptime(psz_work_date_iso, "%Y-%m-%d")
+            obj_time_max: datetime = obj_time_min + timedelta(days=1)
+
+            obj_response = (
+                obj_service.events()
+                .list(
+                    calendarId=CALENDAR_ID,
+                    timeMin=obj_time_min.isoformat() + "+09:00",
+                    timeMax=obj_time_max.isoformat() + "+09:00",
+                    singleEvents=True,
+                )
+                .execute()
+            )
+
+            list_items: list[dict[str, Any]] = obj_response.get("items", [])
+            for obj_item in list_items:
+                psz_summary: str = str(obj_item.get("summary", "")).strip()
+                psz_description: str = str(obj_item.get("description", "")).strip()
+                if psz_summary == psz_title and psz_description == psz_body:
+                    psz_event_id: str = str(obj_item.get("id", ""))
+                    if psz_event_id == "":
+                        continue
+                    obj_service.events().delete(calendarId=CALENDAR_ID, eventId=psz_event_id).execute()
+                    i_deleted_count += 1
+        except HttpError as obj_exception:
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason={obj_exception}, work_date_iso={psz_work_date_iso}, title_text={psz_title}"
+            )
+        except Exception as obj_exception:
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason={obj_exception}, work_date_iso={psz_work_date_iso}, title_text={psz_title}"
+            )
+
+    if len(list_skip_messages) > 0:
+        write_error_text(str(obj_step0007_path), "\n".join(list_skip_messages))
+
+    return i_deleted_count, i_skip_count
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -716,12 +805,17 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
 
 def main() -> int:
     list_arguments: list[str] = sys.argv
-    if len(list_arguments) < 2:
+    obj_parser = argparse.ArgumentParser(add_help=False)
+    obj_parser.add_argument("--mode", choices=["create", "delete"], default="create")
+    obj_parser.add_argument("excel_file_paths", nargs="*")
+    obj_parsed = obj_parser.parse_args(list_arguments[1:])
+
+    if len(obj_parsed.excel_file_paths) < 1:
         psz_usage_message: str = "Usage: python DispatchCalendar_Cmd.py <excel_file_path1> [excel_file_path2 ...]"
         print(psz_usage_message)
         return 1
 
-    list_excel_file_paths: list[str] = list_arguments[1:]
+    list_excel_file_paths: list[str] = obj_parsed.excel_file_paths
     i_success_count: int = 0
     i_failure_count: int = 0
 
@@ -760,8 +854,12 @@ def main() -> int:
             print(f"Step0006 TSV created: {psz_step0006_tsv_path}")
             psz_step0007_tsv_path: str = create_step0007_tsv_from_step0006_tsv(psz_step0006_tsv_path)
             print(f"Step0007 TSV created: {psz_step0007_tsv_path}")
-            i_registered_count, i_skipped_count = create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
-            print(f"Google Calendar events created: {i_registered_count}, skipped: {i_skipped_count}")
+            if obj_parsed.mode == "delete":
+                i_deleted_count, i_skipped_count = delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
+                print(f"Google Calendar events deleted: {i_deleted_count}, skipped: {i_skipped_count}")
+            else:
+                i_registered_count, i_skipped_count = create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
+                print(f"Google Calendar events created: {i_registered_count}, skipped: {i_skipped_count}")
 
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
