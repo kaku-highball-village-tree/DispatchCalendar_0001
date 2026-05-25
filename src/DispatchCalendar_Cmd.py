@@ -9,10 +9,22 @@ import sys
 import traceback
 import re
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from openpyxl import load_workbook
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+SCOPES: list[str] = ["https://www.googleapis.com/auth/calendar.events"]
+CREDENTIALS_FILE = Path("credentials") / "credentials.json"
+TOKEN_FILE = Path("token") / "token.json"
+TIME_ZONE = "Asia/Tokyo"
+CALENDAR_ID = "primary"
 
 
 def write_error_text(psz_excel_file_path: str, psz_error_message: str) -> str:
@@ -519,6 +531,150 @@ def create_step0006_tsv_from_step0005_tsv(psz_step0005_tsv_path: str) -> str:
 
     return str(obj_step0006_path)
 
+
+def create_step0007_tsv_from_step0006_tsv(psz_step0006_tsv_path: str) -> str:
+    """Create step0007 TSV by removing blank lines from step0006 TSV."""
+    obj_step0006_path: Path = Path(psz_step0006_tsv_path)
+    psz_output_stem: str = obj_step0006_path.stem[:-9] if obj_step0006_path.stem.endswith("_step0006") else obj_step0006_path.stem
+    obj_step0007_path: Path = obj_step0006_path.with_name(f"{psz_output_stem}_step0007.tsv")
+
+    with obj_step0006_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    list_output_lines: list[str] = []
+    for psz_line in list_lines:
+        if psz_line.strip() == "":
+            continue
+        list_output_lines.append(psz_line)
+
+    with obj_step0007_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0007_path)
+
+
+def get_google_credentials() -> Credentials:
+    """Load credentials from token.json or run OAuth flow if needed."""
+    if not CREDENTIALS_FILE.exists():
+        raise FileNotFoundError("credentials/credentials.json が見つかりません。")
+
+    obj_credentials: Credentials | None = None
+    if TOKEN_FILE.exists():
+        try:
+            obj_credentials = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        except Exception:
+            obj_credentials = None
+
+    if not obj_credentials or not obj_credentials.valid:
+        if obj_credentials and obj_credentials.expired and obj_credentials.refresh_token:
+            try:
+                obj_credentials.refresh(Request())
+            except Exception:
+                obj_credentials = None
+
+        if not obj_credentials or not obj_credentials.valid:
+            obj_flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+            obj_credentials = obj_flow.run_local_server(port=0)
+
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TOKEN_FILE.write_text(obj_credentials.to_json(), encoding="utf-8")
+
+    return obj_credentials
+
+
+def create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) -> tuple[int, int]:
+    """Register events from step0007 TSV; skip invalid rows and write *_error.txt."""
+    obj_step0007_path: Path = Path(psz_step0007_tsv_path)
+    with obj_step0007_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        return 0, 0
+
+    list_header_columns: list[str] = list_lines[0].split("\t")
+    for psz_required_column in ["title_text", "body_text", "work_date_iso"]:
+        if psz_required_column not in list_header_columns:
+            raise ValueError(f"step0007 TSV must include {psz_required_column} column")
+
+    i_title_index: int = list_header_columns.index("title_text")
+    i_body_index: int = list_header_columns.index("body_text")
+    i_work_date_iso_index: int = list_header_columns.index("work_date_iso")
+
+    obj_service = build("calendar", "v3", credentials=get_google_credentials())
+
+    i_success_count: int = 0
+    i_skip_count: int = 0
+    list_skip_messages: list[str] = []
+
+    for i_line_number, psz_line in enumerate(list_lines[1:], start=2):
+        list_columns: list[str] = psz_line.split("\t")
+        if len(list_columns) <= max(i_title_index, i_body_index, i_work_date_iso_index):
+            i_skip_count += 1
+            list_skip_messages.append(f"line={i_line_number}, reason=required columns missing in row")
+            continue
+
+        psz_title: str = list_columns[i_title_index].strip()
+        psz_body: str = list_columns[i_body_index].replace("\\n", "\n").strip()
+        psz_work_date_iso: str = list_columns[i_work_date_iso_index].strip()
+
+        if psz_title == "":
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason=title_text is empty, work_date_iso={psz_work_date_iso}"
+            )
+            continue
+
+        if psz_work_date_iso == "":
+            i_skip_count += 1
+            list_skip_messages.append(f"line={i_line_number}, reason=work_date_iso is empty, title_text={psz_title}")
+            continue
+
+        try:
+            if "T" in psz_work_date_iso:
+                obj_start_datetime: datetime = datetime.fromisoformat(psz_work_date_iso)
+                obj_end_datetime: datetime = obj_start_datetime + timedelta(hours=1)
+                obj_event_body: dict[str, object] = {
+                    "summary": psz_title,
+                    "location": "",
+                    "description": psz_body,
+                    "start": {"dateTime": obj_start_datetime.isoformat(), "timeZone": TIME_ZONE},
+                    "end": {"dateTime": obj_end_datetime.isoformat(), "timeZone": TIME_ZONE},
+                }
+            else:
+                obj_start_date: datetime = datetime.strptime(psz_work_date_iso, "%Y-%m-%d")
+                obj_end_date: datetime = obj_start_date + timedelta(days=1)
+                obj_event_body = {
+                    "summary": psz_title,
+                    "location": "",
+                    "description": psz_body,
+                    "start": {"date": obj_start_date.strftime("%Y-%m-%d"), "timeZone": TIME_ZONE},
+                    "end": {"date": obj_end_date.strftime("%Y-%m-%d"), "timeZone": TIME_ZONE},
+                }
+
+            created_event = (
+                obj_service.events()
+                .insert(calendarId=CALENDAR_ID, body=obj_event_body)
+                .execute()
+            )
+            print(created_event.get("htmlLink", ""))
+            i_success_count += 1
+        except HttpError as obj_exception:
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason={obj_exception}, work_date_iso={psz_work_date_iso}, title_text={psz_title}"
+            )
+        except Exception as obj_exception:
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason={obj_exception}, work_date_iso={psz_work_date_iso}, title_text={psz_title}"
+            )
+
+    if len(list_skip_messages) > 0:
+        write_error_text(str(obj_step0007_path), "\n".join(list_skip_messages))
+
+    return i_success_count, i_skip_count
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -602,6 +758,10 @@ def main() -> int:
             print(f"Step0005 TSV created: {psz_step0005_tsv_path}")
             psz_step0006_tsv_path: str = create_step0006_tsv_from_step0005_tsv(psz_step0005_tsv_path)
             print(f"Step0006 TSV created: {psz_step0006_tsv_path}")
+            psz_step0007_tsv_path: str = create_step0007_tsv_from_step0006_tsv(psz_step0006_tsv_path)
+            print(f"Step0007 TSV created: {psz_step0007_tsv_path}")
+            i_registered_count, i_skipped_count = create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
+            print(f"Google Calendar events created: {i_registered_count}, skipped: {i_skipped_count}")
 
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
