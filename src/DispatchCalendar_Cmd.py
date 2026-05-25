@@ -369,7 +369,7 @@ def create_step0002_outputs_from_step0001_tsv(psz_step0001_tsv_path: str) -> tup
 
 
 def create_step0003_tsv_from_step0002_tsv(psz_step0002_tsv_path: str) -> str:
-    """Create step0003 TSV from step0002 TSV."""
+    """Create step0003 TSV by removing columns 1-10 from step0002 TSV."""
     obj_step0002_path: Path = Path(psz_step0002_tsv_path)
     psz_output_stem: str = obj_step0002_path.stem[:-9] if obj_step0002_path.stem.endswith("_step0002") else obj_step0002_path.stem
     obj_step0003_path: Path = obj_step0002_path.with_name(f"{psz_output_stem}_step0003.tsv")
@@ -377,9 +377,16 @@ def create_step0003_tsv_from_step0002_tsv(psz_step0002_tsv_path: str) -> str:
     with obj_step0002_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
         list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
 
+    list_output_lines: list[str] = []
+    for psz_line in list_lines:
+        list_columns: list[str] = psz_line.split("\t")
+        if len(list_columns) < 10:
+            raise ValueError("step0002 TSV row must have at least 10 columns")
+        list_output_lines.append("\t".join(list_columns[10:]))
+
     with obj_step0003_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
-        for psz_line in list_lines:
-            obj_output_file.write(psz_line + "\n")
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
 
     return str(obj_step0003_path)
 
