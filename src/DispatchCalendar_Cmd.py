@@ -244,7 +244,7 @@ def parse_step0001_tsv_to_calendar_records(psz_step0001_tsv_path: str) -> list[d
 
         if psz_car_no != "":
             list_car_nos: list[str] = obj_current_record["car_nos"]
-            if psz_car_no not in list_car_nos:
+            if psz_car_no not in list_car_nos and len(list_car_nos) < 3:
                 list_car_nos.append(psz_car_no)
 
         for i_slot_index, psz_slot_value in enumerate(list_slot_values, start=1):
@@ -263,13 +263,14 @@ def parse_step0001_tsv_to_calendar_records(psz_step0001_tsv_path: str) -> list[d
     for obj_record in list_records:
         list_car_nos = obj_record["car_nos"]
         obj_record["car_no"] = ",".join(list_car_nos)
-        psz_car_for_title: str = obj_record["car_no"] if obj_record["car_no"] != "" else "車番未設定"
+        obj_record["car_no_display"] = "/".join(list_car_nos)
+        psz_car_for_title: str = obj_record["car_no_display"] if obj_record["car_no_display"] != "" else "車番未設定"
         obj_record["title_text"] = f"{obj_record['name']}（{psz_car_for_title}）"
 
         list_body_lines: list[str] = [
             f"日付: {obj_record['work_date_text']}",
             f"氏名: {obj_record['name']}",
-            f"車番: {obj_record['car_no']}",
+            f"車番: {obj_record['car_no_display']}",
         ]
         for i_slot_index in range(1, 7):
             psz_slot_text: str = obj_record["slots"][str(i_slot_index)]
@@ -293,6 +294,7 @@ def create_step0002_outputs_from_step0001_tsv(psz_step0001_tsv_path: str) -> tup
 
     list_tsv_columns: list[str] = [
         "name",
+        "car_no_display",
         "car_no",
         "car_nos_joined",
         "slot1",
@@ -310,6 +312,7 @@ def create_step0002_outputs_from_step0001_tsv(psz_step0001_tsv_path: str) -> tup
         for obj_record in list_records:
             list_row_values: list[str] = [
                 obj_record["name"],
+                obj_record["car_no_display"],
                 obj_record["car_no"],
                 obj_record["car_no"],
                 obj_record["slots"]["1"],
