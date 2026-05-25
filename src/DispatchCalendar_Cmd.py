@@ -367,6 +367,22 @@ def create_step0002_outputs_from_step0001_tsv(psz_step0001_tsv_path: str) -> tup
 
 
 
+
+def create_step0003_tsv_from_step0002_tsv(psz_step0002_tsv_path: str) -> str:
+    """Create step0003 TSV from step0002 TSV."""
+    obj_step0002_path: Path = Path(psz_step0002_tsv_path)
+    psz_output_stem: str = obj_step0002_path.stem[:-9] if obj_step0002_path.stem.endswith("_step0002") else obj_step0002_path.stem
+    obj_step0003_path: Path = obj_step0002_path.with_name(f"{psz_output_stem}_step0003.tsv")
+
+    with obj_step0002_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    with obj_step0003_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_line in list_lines:
+            obj_output_file.write(psz_line + "\n")
+
+    return str(obj_step0003_path)
+
 def convert_japanese_era_date_text_to_iso(psz_work_date_text: str) -> str:
     """Convert Japanese era style date text like '令和8年 5月 5日（火）' to ISO date (YYYY-MM-DD)."""
     psz_normalized_text: str = psz_work_date_text
@@ -512,11 +528,10 @@ def main() -> int:
             psz_step0002_tsv_path, psz_step0002_json_path = create_step0002_outputs_from_step0001_tsv(psz_created_step_tsv_path)
             print(f"Step0002 TSV created: {psz_step0002_tsv_path}")
             print(f"Step0002 JSON created: {psz_step0002_json_path}")
-
-            obj_step0003_candidate_path: Path = Path(psz_step0002_tsv_path).with_name(Path(psz_step0002_tsv_path).name.replace("_step0002.tsv", "_step0003.tsv"))
-            if obj_step0003_candidate_path.exists() and obj_step0003_candidate_path.is_file():
-                psz_step0004_tsv_path: str = create_step0004_tsv_from_step0003_tsv(str(obj_step0003_candidate_path))
-                print(f"Step0004 TSV created: {psz_step0004_tsv_path}")
+            psz_step0003_tsv_path: str = create_step0003_tsv_from_step0002_tsv(psz_step0002_tsv_path)
+            print(f"Step0003 TSV created: {psz_step0003_tsv_path}")
+            psz_step0004_tsv_path: str = create_step0004_tsv_from_step0003_tsv(psz_step0003_tsv_path)
+            print(f"Step0004 TSV created: {psz_step0004_tsv_path}")
 
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
