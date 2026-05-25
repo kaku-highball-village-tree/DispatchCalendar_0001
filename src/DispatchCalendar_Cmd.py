@@ -265,17 +265,39 @@ def parse_step0001_tsv_to_calendar_records(psz_step0001_tsv_path: str) -> list[d
         obj_record["car_no"] = ",".join(list_car_nos)
         obj_record["car_no_display"] = "/".join(list_car_nos)
         psz_car_for_title: str = obj_record["car_no_display"] if obj_record["car_no_display"] != "" else "車番未設定"
-        obj_record["title_text"] = f"{obj_record['name']}（{psz_car_for_title}）"
+        list_slot_lines: list[list[str]] = [obj_record["slots"][str(i_slot_index)].split("\n") for i_slot_index in range(1, 7)]
+        i_max_slot_line_count: int = 1
+        for list_slot_line in list_slot_lines:
+            if len(list_slot_line) > i_max_slot_line_count:
+                i_max_slot_line_count = len(list_slot_line)
 
-        list_body_lines: list[str] = [
-            f"日付: {obj_record['work_date_text']}",
-            f"氏名: {obj_record['name']}",
-            f"車番: {obj_record['car_no_display']}",
-        ]
-        for i_slot_index in range(1, 7):
-            psz_slot_text: str = obj_record["slots"][str(i_slot_index)]
-            if psz_slot_text != "":
-                list_body_lines.append(f"{i_slot_index}: {psz_slot_text}")
+        def build_slot_line(i_line_index: int) -> str:
+            list_values: list[str] = [
+                list_slot_line[i_line_index] if i_line_index < len(list_slot_line) else "" for list_slot_line in list_slot_lines
+            ]
+            list_non_blank_values: list[str] = [psz_value for psz_value in list_values if psz_value != ""]
+            return " ".join(list_non_blank_values)
+
+        psz_first_slot_line: str = build_slot_line(0)
+        list_title_parts: list[str] = [obj_record["name"], psz_car_for_title]
+        if psz_first_slot_line != "":
+            list_title_parts.append(psz_first_slot_line)
+        obj_record["title_text"] = " ".join(list_title_parts)
+
+        list_body_lines: list[str] = []
+        if i_max_slot_line_count >= 2:
+            psz_second_slot_line: str = build_slot_line(1)
+            if psz_second_slot_line != "":
+                list_body_lines.append(psz_second_slot_line)
+        else:
+            if psz_first_slot_line != "":
+                list_body_lines.append(psz_first_slot_line)
+
+        for i_line_index in range(2, i_max_slot_line_count):
+            psz_extra_slot_line: str = build_slot_line(i_line_index)
+            if psz_extra_slot_line != "":
+                list_body_lines.append(psz_extra_slot_line)
+
         obj_record["body_text"] = "\n".join(list_body_lines)
 
     return list_records
