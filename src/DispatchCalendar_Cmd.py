@@ -310,22 +310,32 @@ def create_step0002_outputs_from_step0001_tsv(psz_step0001_tsv_path: str) -> tup
     with obj_step0002_tsv_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_tsv_file:
         obj_tsv_file.write("\t".join(list_tsv_columns) + "\n")
         for obj_record in list_records:
-            list_row_values: list[str] = [
-                obj_record["name"],
-                obj_record["car_no_display"],
-                obj_record["car_no"],
-                obj_record["car_no"],
-                obj_record["slots"]["1"],
-                obj_record["slots"]["2"],
-                obj_record["slots"]["3"],
-                obj_record["slots"]["4"],
-                obj_record["slots"]["5"],
-                obj_record["slots"]["6"],
-                obj_record["title_text"],
-                obj_record["body_text"].replace("\n", "\\n"),
-                obj_record["work_date_text"],
-            ]
-            obj_tsv_file.write("\t".join(list_row_values) + "\n")
+            list_slot_lines: list[list[str]] = [obj_record["slots"][str(i_slot_index)].split("\n") for i_slot_index in range(1, 7)]
+            i_max_slot_line_count: int = 1
+            for list_slot_line in list_slot_lines:
+                if len(list_slot_line) > i_max_slot_line_count:
+                    i_max_slot_line_count = len(list_slot_line)
+
+            for i_line_index in range(i_max_slot_line_count):
+                list_slot_values: list[str] = [
+                    list_slot_line[i_line_index] if i_line_index < len(list_slot_line) else "" for list_slot_line in list_slot_lines
+                ]
+                list_row_values: list[str] = [
+                    obj_record["name"] if i_line_index == 0 else "",
+                    obj_record["car_no_display"] if i_line_index == 0 else "",
+                    obj_record["car_no"] if i_line_index == 0 else "",
+                    obj_record["car_no"] if i_line_index == 0 else "",
+                    list_slot_values[0],
+                    list_slot_values[1],
+                    list_slot_values[2],
+                    list_slot_values[3],
+                    list_slot_values[4],
+                    list_slot_values[5],
+                    obj_record["title_text"] if i_line_index == 0 else "",
+                    obj_record["body_text"].replace("\n", "\\n") if i_line_index == 0 else "",
+                    obj_record["work_date_text"] if i_line_index == 0 else "",
+                ]
+                obj_tsv_file.write("\t".join(list_row_values) + "\n")
 
     with obj_step0002_json_path.open(mode="w", encoding="utf-8", newline="\n") as obj_json_file:
         for obj_record in list_records:
