@@ -460,6 +460,31 @@ def create_step0004_tsv_from_step0003_tsv(psz_step0003_tsv_path: str) -> str:
 
     return str(obj_step0004_path)
 
+
+def create_step0005_tsv_from_step0004_tsv(psz_step0004_tsv_path: str) -> str:
+    """Create step0005 TSV by trimming trailing tab-only empty cells from data rows."""
+    obj_step0004_path: Path = Path(psz_step0004_tsv_path)
+    psz_output_stem: str = obj_step0004_path.stem[:-9] if obj_step0004_path.stem.endswith("_step0004") else obj_step0004_path.stem
+    obj_step0005_path: Path = obj_step0004_path.with_name(f"{psz_output_stem}_step0005.tsv")
+
+    with obj_step0004_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        with obj_step0005_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+            obj_output_file.write("")
+        return str(obj_step0005_path)
+
+    list_output_lines: list[str] = [list_lines[0]]
+    for psz_data_line in list_lines[1:]:
+        list_output_lines.append(psz_data_line.rstrip("	"))
+
+    with obj_step0005_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0005_path)
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -539,6 +564,8 @@ def main() -> int:
             print(f"Step0003 TSV created: {psz_step0003_tsv_path}")
             psz_step0004_tsv_path: str = create_step0004_tsv_from_step0003_tsv(psz_step0003_tsv_path)
             print(f"Step0004 TSV created: {psz_step0004_tsv_path}")
+            psz_step0005_tsv_path: str = create_step0005_tsv_from_step0004_tsv(psz_step0004_tsv_path)
+            print(f"Step0005 TSV created: {psz_step0005_tsv_path}")
 
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
