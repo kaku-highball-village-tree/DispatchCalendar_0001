@@ -8,6 +8,7 @@ from __future__ import annotations
 import sys
 import traceback
 import re
+import json
 from pathlib import Path
 from typing import Any
 
@@ -200,6 +201,136 @@ def create_step0001_tsv_from_tsv(psz_tsv_file_path: str) -> str:
     return str(obj_step_tsv_path)
 
 
+def parse_step0001_tsv_to_calendar_records(psz_step0001_tsv_path: str) -> list[dict[str, Any]]:
+    """Parse step0001 TSV into per-person calendar records."""
+    obj_step0001_tsv_path: Path = Path(psz_step0001_tsv_path)
+    with obj_step0001_tsv_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) < 3:
+        return []
+
+    psz_work_date_text: str = list_lines[0]
+    list_data_lines: list[str] = list_lines[2:]
+
+    list_records: list[dict[str, Any]] = []
+    obj_current_record: dict[str, Any] | None = None
+
+    for psz_line in list_data_lines:
+        list_columns: list[str] = psz_line.split("\t")
+        if len(list_columns) < 8:
+            list_columns.extend([""] * (8 - len(list_columns)))
+
+        psz_name: str = list_columns[0].strip()
+        psz_car_no: str = list_columns[1].strip()
+        list_slot_values: list[str] = [list_columns[i].strip() for i in range(2, 8)]
+
+        b_is_blank_row: bool = psz_name == "" and psz_car_no == "" and all(psz_slot == "" for psz_slot in list_slot_values)
+        if b_is_blank_row:
+            continue
+
+        if psz_name != "":
+            if obj_current_record is not None:
+                list_records.append(obj_current_record)
+            obj_current_record = {
+                "name": psz_name,
+                "car_nos": [],
+                "slots": {str(i): "" for i in range(1, 7)},
+                "work_date_text": psz_work_date_text,
+            }
+
+        if obj_current_record is None:
+            continue
+
+        if psz_car_no != "":
+            list_car_nos: list[str] = obj_current_record["car_nos"]
+            if psz_car_no not in list_car_nos:
+                list_car_nos.append(psz_car_no)
+
+        for i_slot_index, psz_slot_value in enumerate(list_slot_values, start=1):
+            if psz_slot_value == "":
+                continue
+            psz_slot_key: str = str(i_slot_index)
+            psz_existing: str = obj_current_record["slots"][psz_slot_key]
+            if psz_existing == "":
+                obj_current_record["slots"][psz_slot_key] = psz_slot_value
+            else:
+                obj_current_record["slots"][psz_slot_key] = f"{psz_existing}\n{psz_slot_value}"
+
+    if obj_current_record is not None:
+        list_records.append(obj_current_record)
+
+    for obj_record in list_records:
+        list_car_nos = obj_record["car_nos"]
+        obj_record["car_no"] = ",".join(list_car_nos)
+        psz_car_for_title: str = obj_record["car_no"] if obj_record["car_no"] != "" else "車番未設定"
+        obj_record["title_text"] = f"{obj_record['name']}（{psz_car_for_title}）"
+
+        list_body_lines: list[str] = [
+            f"日付: {obj_record['work_date_text']}",
+            f"氏名: {obj_record['name']}",
+            f"車番: {obj_record['car_no']}",
+        ]
+        for i_slot_index in range(1, 7):
+            psz_slot_text: str = obj_record["slots"][str(i_slot_index)]
+            if psz_slot_text != "":
+                list_body_lines.append(f"{i_slot_index}: {psz_slot_text}")
+        obj_record["body_text"] = "\n".join(list_body_lines)
+
+    return list_records
+
+
+def create_step0002_outputs_from_step0001_tsv(psz_step0001_tsv_path: str) -> tuple[str, str]:
+    """Create step0002 TSV and JSON (NDJSON) from step0001 TSV."""
+    obj_step0001_tsv_path: Path = Path(psz_step0001_tsv_path)
+    psz_step_stem: str = obj_step0001_tsv_path.stem
+    psz_output_stem: str = psz_step_stem[:-9] if psz_step_stem.endswith("_step0001") else psz_step_stem
+
+    obj_step0002_tsv_path: Path = obj_step0001_tsv_path.with_name(f"{psz_output_stem}_step0002.tsv")
+    obj_step0002_json_path: Path = obj_step0001_tsv_path.with_name(f"{psz_output_stem}_step0002.json")
+
+    list_records: list[dict[str, Any]] = parse_step0001_tsv_to_calendar_records(str(obj_step0001_tsv_path))
+
+    list_tsv_columns: list[str] = [
+        "name",
+        "car_no",
+        "car_nos_joined",
+        "slot1",
+        "slot2",
+        "slot3",
+        "slot4",
+        "slot5",
+        "slot6",
+        "title_text",
+        "body_text",
+        "work_date_text",
+    ]
+    with obj_step0002_tsv_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_tsv_file:
+        obj_tsv_file.write("\t".join(list_tsv_columns) + "\n")
+        for obj_record in list_records:
+            list_row_values: list[str] = [
+                obj_record["name"],
+                obj_record["car_no"],
+                obj_record["car_no"],
+                obj_record["slots"]["1"],
+                obj_record["slots"]["2"],
+                obj_record["slots"]["3"],
+                obj_record["slots"]["4"],
+                obj_record["slots"]["5"],
+                obj_record["slots"]["6"],
+                obj_record["title_text"],
+                obj_record["body_text"].replace("\n", "\\n"),
+                obj_record["work_date_text"],
+            ]
+            obj_tsv_file.write("\t".join(list_row_values) + "\n")
+
+    with obj_step0002_json_path.open(mode="w", encoding="utf-8", newline="\n") as obj_json_file:
+        for obj_record in list_records:
+            obj_json_file.write(json.dumps(obj_record, ensure_ascii=False) + "\n")
+
+    return str(obj_step0002_tsv_path), str(obj_step0002_json_path)
+
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -272,6 +403,9 @@ def main() -> int:
             print(f"TSV created: {psz_created_tsv_path}")
             psz_created_step_tsv_path: str = create_step0001_tsv_from_tsv(psz_created_tsv_path)
             print(f"Step TSV created: {psz_created_step_tsv_path}")
+            psz_step0002_tsv_path, psz_step0002_json_path = create_step0002_outputs_from_step0001_tsv(psz_created_step_tsv_path)
+            print(f"Step0002 TSV created: {psz_step0002_tsv_path}")
+            print(f"Step0002 JSON created: {psz_step0002_json_path}")
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
             psz_traceback_text: str = traceback.format_exc()
