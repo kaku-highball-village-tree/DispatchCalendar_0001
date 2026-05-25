@@ -532,6 +532,28 @@ def create_step0006_tsv_from_step0005_tsv(psz_step0005_tsv_path: str) -> str:
     return str(obj_step0006_path)
 
 
+def create_step0007_tsv_from_step0006_tsv(psz_step0006_tsv_path: str) -> str:
+    """Create step0007 TSV by removing blank lines from step0006 TSV."""
+    obj_step0006_path: Path = Path(psz_step0006_tsv_path)
+    psz_output_stem: str = obj_step0006_path.stem[:-9] if obj_step0006_path.stem.endswith("_step0006") else obj_step0006_path.stem
+    obj_step0007_path: Path = obj_step0006_path.with_name(f"{psz_output_stem}_step0007.tsv")
+
+    with obj_step0006_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    list_output_lines: list[str] = []
+    for psz_line in list_lines:
+        if psz_line.strip() == "":
+            continue
+        list_output_lines.append(psz_line)
+
+    with obj_step0007_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0007_path)
+
+
 def get_google_credentials() -> Credentials:
     """Load credentials from token.json or run OAuth flow if needed."""
     if not CREDENTIALS_FILE.exists():
@@ -561,10 +583,10 @@ def get_google_credentials() -> Credentials:
     return obj_credentials
 
 
-def create_google_calendar_events_from_step0006_tsv(psz_step0006_tsv_path: str) -> tuple[int, int]:
-    """Register events from step0006 TSV; skip invalid rows and write *_error.txt."""
-    obj_step0006_path: Path = Path(psz_step0006_tsv_path)
-    with obj_step0006_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+def create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) -> tuple[int, int]:
+    """Register events from step0007 TSV; skip invalid rows and write *_error.txt."""
+    obj_step0007_path: Path = Path(psz_step0007_tsv_path)
+    with obj_step0007_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
         list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
 
     if len(list_lines) == 0:
@@ -573,7 +595,7 @@ def create_google_calendar_events_from_step0006_tsv(psz_step0006_tsv_path: str) 
     list_header_columns: list[str] = list_lines[0].split("\t")
     for psz_required_column in ["title_text", "body_text", "work_date_iso"]:
         if psz_required_column not in list_header_columns:
-            raise ValueError(f"step0006 TSV must include {psz_required_column} column")
+            raise ValueError(f"step0007 TSV must include {psz_required_column} column")
 
     i_title_index: int = list_header_columns.index("title_text")
     i_body_index: int = list_header_columns.index("body_text")
@@ -649,7 +671,7 @@ def create_google_calendar_events_from_step0006_tsv(psz_step0006_tsv_path: str) 
             )
 
     if len(list_skip_messages) > 0:
-        write_error_text(str(obj_step0006_path), "\n".join(list_skip_messages))
+        write_error_text(str(obj_step0007_path), "\n".join(list_skip_messages))
 
     return i_success_count, i_skip_count
 
@@ -736,7 +758,9 @@ def main() -> int:
             print(f"Step0005 TSV created: {psz_step0005_tsv_path}")
             psz_step0006_tsv_path: str = create_step0006_tsv_from_step0005_tsv(psz_step0005_tsv_path)
             print(f"Step0006 TSV created: {psz_step0006_tsv_path}")
-            i_registered_count, i_skipped_count = create_google_calendar_events_from_step0006_tsv(psz_step0006_tsv_path)
+            psz_step0007_tsv_path: str = create_step0007_tsv_from_step0006_tsv(psz_step0006_tsv_path)
+            print(f"Step0007 TSV created: {psz_step0007_tsv_path}")
+            i_registered_count, i_skipped_count = create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
             print(f"Google Calendar events created: {i_registered_count}, skipped: {i_skipped_count}")
 
             i_success_count += 1
