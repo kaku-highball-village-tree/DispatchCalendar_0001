@@ -485,6 +485,40 @@ def create_step0005_tsv_from_step0004_tsv(psz_step0004_tsv_path: str) -> str:
 
     return str(obj_step0005_path)
 
+
+def create_step0006_tsv_from_step0005_tsv(psz_step0005_tsv_path: str) -> str:
+    """Create step0006 TSV by removing work_date_text column."""
+    obj_step0005_path: Path = Path(psz_step0005_tsv_path)
+    psz_output_stem: str = obj_step0005_path.stem[:-9] if obj_step0005_path.stem.endswith("_step0005") else obj_step0005_path.stem
+    obj_step0006_path: Path = obj_step0005_path.with_name(f"{psz_output_stem}_step0006.tsv")
+
+    with obj_step0005_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        with obj_step0006_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+            obj_output_file.write("")
+        return str(obj_step0006_path)
+
+    list_header_columns: list[str] = list_lines[0].split("\t")
+    if "work_date_text" not in list_header_columns:
+        raise ValueError("step0005 TSV must include work_date_text column")
+
+    i_work_date_text_index: int = list_header_columns.index("work_date_text")
+    list_output_lines: list[str] = []
+
+    for psz_line in list_lines:
+        list_columns: list[str] = psz_line.split("\t")
+        if i_work_date_text_index < len(list_columns):
+            del list_columns[i_work_date_text_index]
+        list_output_lines.append("\t".join(list_columns))
+
+    with obj_step0006_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0006_path)
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -566,6 +600,8 @@ def main() -> int:
             print(f"Step0004 TSV created: {psz_step0004_tsv_path}")
             psz_step0005_tsv_path: str = create_step0005_tsv_from_step0004_tsv(psz_step0004_tsv_path)
             print(f"Step0005 TSV created: {psz_step0005_tsv_path}")
+            psz_step0006_tsv_path: str = create_step0006_tsv_from_step0005_tsv(psz_step0005_tsv_path)
+            print(f"Step0006 TSV created: {psz_step0006_tsv_path}")
 
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
