@@ -366,6 +366,125 @@ def create_step0002_outputs_from_step0001_tsv(psz_step0001_tsv_path: str) -> tup
     return str(obj_step0002_tsv_path), str(obj_step0002_json_path)
 
 
+
+
+def create_step0003_tsv_from_step0002_tsv(psz_step0002_tsv_path: str) -> str:
+    """Create step0003 TSV by removing columns 1-10 from step0002 TSV."""
+    obj_step0002_path: Path = Path(psz_step0002_tsv_path)
+    psz_output_stem: str = obj_step0002_path.stem[:-9] if obj_step0002_path.stem.endswith("_step0002") else obj_step0002_path.stem
+    obj_step0003_path: Path = obj_step0002_path.with_name(f"{psz_output_stem}_step0003.tsv")
+
+    with obj_step0002_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    list_output_lines: list[str] = []
+    for psz_line in list_lines:
+        list_columns: list[str] = psz_line.split("\t")
+        if len(list_columns) < 10:
+            raise ValueError("step0002 TSV row must have at least 10 columns")
+        list_output_lines.append("\t".join(list_columns[10:]))
+
+    with obj_step0003_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0003_path)
+
+def convert_japanese_era_date_text_to_iso(psz_work_date_text: str) -> str:
+    """Convert Japanese era style date text like '令和8年 5月 5日（火）' to ISO date (YYYY-MM-DD)."""
+    psz_normalized_text: str = psz_work_date_text
+    psz_normalized_text = psz_normalized_text.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    psz_normalized_text = re.sub(r"[\u3000\s]+", " ", psz_normalized_text).strip()
+    psz_normalized_text = re.sub(r"[（(][^)）]*[）)]", "", psz_normalized_text).strip()
+
+    obj_match: re.Match[str] | None = re.search(r"令和\s*(\d+)\s*年\s*(\d+)\s*月\s*(\d+)\s*日", psz_normalized_text)
+    if obj_match is not None:
+        i_reiwa_year: int = int(obj_match.group(1))
+        i_year: int = 2018 + i_reiwa_year
+        i_month: int = int(obj_match.group(2))
+        i_day: int = int(obj_match.group(3))
+        return f"{i_year:04d}-{i_month:02d}-{i_day:02d}"
+
+    obj_western_match: re.Match[str] | None = re.search(r"(\d{4})\s*年\s*(\d+)\s*月\s*(\d+)\s*日", psz_normalized_text)
+    if obj_western_match is not None:
+        i_year = int(obj_western_match.group(1))
+        i_month = int(obj_western_match.group(2))
+        i_day = int(obj_western_match.group(3))
+        return f"{i_year:04d}-{i_month:02d}-{i_day:02d}"
+
+    raise ValueError(f"Unable to parse work_date_text: {psz_work_date_text}")
+
+
+def create_step0004_tsv_from_step0003_tsv(psz_step0003_tsv_path: str) -> str:
+    """Create step0004 TSV by inserting work_date_iso column derived from work_date_text."""
+    obj_step0003_path: Path = Path(psz_step0003_tsv_path)
+    psz_output_stem: str = obj_step0003_path.stem[:-9] if obj_step0003_path.stem.endswith("_step0003") else obj_step0003_path.stem
+    obj_step0004_path: Path = obj_step0003_path.with_name(f"{psz_output_stem}_step0004.tsv")
+
+    with obj_step0003_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        with obj_step0004_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+            obj_output_file.write("")
+        return str(obj_step0004_path)
+
+    list_header_columns: list[str] = list_lines[0].split("\t")
+    if "work_date_text" not in list_header_columns:
+        raise ValueError("step0003 TSV must include work_date_text column")
+
+    i_work_date_text_index: int = list_header_columns.index("work_date_text")
+    i_insert_index: int = i_work_date_text_index + 1
+    list_output_lines: list[str] = []
+
+    list_new_header_columns: list[str] = list_header_columns[:]
+    list_new_header_columns.insert(i_insert_index, "work_date_iso")
+    list_output_lines.append("\t".join(list_new_header_columns))
+
+    for psz_data_line in list_lines[1:]:
+        list_columns: list[str] = psz_data_line.split("\t")
+        if len(list_columns) < len(list_header_columns):
+            list_columns.extend([""] * (len(list_header_columns) - len(list_columns)))
+
+        psz_work_date_text: str = list_columns[i_work_date_text_index]
+        psz_work_date_iso: str = ""
+        if psz_work_date_text.strip() != "":
+            psz_work_date_iso = convert_japanese_era_date_text_to_iso(psz_work_date_text)
+
+        list_columns.insert(i_insert_index, psz_work_date_iso)
+        list_output_lines.append("\t".join(list_columns))
+
+    with obj_step0004_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0004_path)
+
+
+def create_step0005_tsv_from_step0004_tsv(psz_step0004_tsv_path: str) -> str:
+    """Create step0005 TSV by trimming trailing tab-only empty cells from data rows."""
+    obj_step0004_path: Path = Path(psz_step0004_tsv_path)
+    psz_output_stem: str = obj_step0004_path.stem[:-9] if obj_step0004_path.stem.endswith("_step0004") else obj_step0004_path.stem
+    obj_step0005_path: Path = obj_step0004_path.with_name(f"{psz_output_stem}_step0005.tsv")
+
+    with obj_step0004_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        with obj_step0005_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+            obj_output_file.write("")
+        return str(obj_step0005_path)
+
+    list_output_lines: list[str] = [list_lines[0]]
+    for psz_data_line in list_lines[1:]:
+        list_output_lines.append(psz_data_line.rstrip("	"))
+
+    with obj_step0005_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0005_path)
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -441,6 +560,13 @@ def main() -> int:
             psz_step0002_tsv_path, psz_step0002_json_path = create_step0002_outputs_from_step0001_tsv(psz_created_step_tsv_path)
             print(f"Step0002 TSV created: {psz_step0002_tsv_path}")
             print(f"Step0002 JSON created: {psz_step0002_json_path}")
+            psz_step0003_tsv_path: str = create_step0003_tsv_from_step0002_tsv(psz_step0002_tsv_path)
+            print(f"Step0003 TSV created: {psz_step0003_tsv_path}")
+            psz_step0004_tsv_path: str = create_step0004_tsv_from_step0003_tsv(psz_step0003_tsv_path)
+            print(f"Step0004 TSV created: {psz_step0004_tsv_path}")
+            psz_step0005_tsv_path: str = create_step0005_tsv_from_step0004_tsv(psz_step0004_tsv_path)
+            print(f"Step0005 TSV created: {psz_step0005_tsv_path}")
+
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
             psz_traceback_text: str = traceback.format_exc()
