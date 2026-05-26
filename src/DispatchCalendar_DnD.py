@@ -20,6 +20,12 @@ INSTRUCTION_FONT_FACE: str = "Meiryo UI"
 WINDOW_CLASS_NAME: str = "DispatchCalendarDnDWindowClass"
 WINDOW_TITLE: str = "DispatchCalendar DnD"
 MESSAGE_BOX_TITLE: str = "DispatchCalendar DnD"
+DELETE_TOGGLE_BUTTON_ID: int = 1001
+DELETE_TOGGLE_LABEL_OFF: str = "削除: OFF"
+DELETE_TOGGLE_LABEL_ON: str = "削除: ON"
+
+g_b_delete_mode: bool = False
+g_h_delete_toggle_button: int = 0
 
 
 def create_instruction_font() -> int:
@@ -75,7 +81,7 @@ def is_valid_excel_file_path(obj_file_path: Path) -> bool:
     return b_has_valid_extension and b_exists and b_is_file
 
 
-def run_cmd_converter(h_window: int, list_excel_file_paths: list[Path]) -> None:
+def run_cmd_converter(h_window: int, list_excel_file_paths: list[Path], b_delete_mode: bool) -> None:
     """Run CMD converter via subprocess and show result message."""
     obj_cmd_script_path: Path = get_cmd_script_path()
     if not obj_cmd_script_path.exists():
@@ -86,7 +92,8 @@ def run_cmd_converter(h_window: int, list_excel_file_paths: list[Path]) -> None:
         show_error_message_box(h_window, "有効なExcelファイル(.xlsx)がありません。")
         return
 
-    list_subprocess_arguments: list[str] = [sys.executable, str(obj_cmd_script_path)] + [str(obj_path) for obj_path in list_excel_file_paths]
+    psz_mode: str = "delete" if b_delete_mode else "create"
+    list_subprocess_arguments: list[str] = [sys.executable, str(obj_cmd_script_path), "--mode", psz_mode] + [str(obj_path) for obj_path in list_excel_file_paths]
     obj_working_directory_path: Path = list_excel_file_paths[0].parent
 
     try:
@@ -138,14 +145,65 @@ def on_drop_files(h_window: int, h_drop: int) -> None:
         show_error_message_box(h_window, "Excelファイル(.xlsx)のみ受け付けます。")
         return
 
-    run_cmd_converter(h_window, list_excel_file_paths)
+    run_cmd_converter(h_window, list_excel_file_paths, g_b_delete_mode)
+
+
+def update_delete_toggle_button_caption(h_window: int) -> None:
+    """Update delete toggle button text from current mode."""
+    if g_h_delete_toggle_button == 0:
+        return
+
+    psz_button_text: str = DELETE_TOGGLE_LABEL_ON if g_b_delete_mode else DELETE_TOGGLE_LABEL_OFF
+    win32gui.SetWindowText(g_h_delete_toggle_button, psz_button_text)
 
 
 def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) -> int:
     """Main window procedure."""
+    global g_b_delete_mode, g_h_delete_toggle_button
+
     if i_message == win32con.WM_CREATE:
         win32api.DragAcceptFiles(h_window, True)
+        h_instance: int = win32api.GetModuleHandle(None)
+        i_button_width: int = 120
+        i_button_height: int = 34
+        i_margin: int = 15
+        obj_client_rect: tuple[int, int, int, int] = win32gui.GetClientRect(h_window)
+        i_button_x: int = max(i_margin, obj_client_rect[2] - i_button_width - i_margin)
+        i_button_y: int = max(i_margin, obj_client_rect[3] - i_button_height - i_margin)
+        g_h_delete_toggle_button = win32gui.CreateWindowEx(
+            0,
+            "BUTTON",
+            DELETE_TOGGLE_LABEL_OFF,
+            win32con.WS_CHILD | win32con.WS_VISIBLE | win32con.BS_PUSHBUTTON,
+            i_button_x,
+            i_button_y,
+            i_button_width,
+            i_button_height,
+            h_window,
+            DELETE_TOGGLE_BUTTON_ID,
+            h_instance,
+            None,
+        )
         return 0
+
+    if i_message == win32con.WM_SIZE:
+        if g_h_delete_toggle_button != 0:
+            i_button_width = 120
+            i_button_height = 34
+            i_margin = 15
+            i_client_width: int = win32api.LOWORD(l_param)
+            i_client_height: int = win32api.HIWORD(l_param)
+            i_button_x: int = max(i_margin, i_client_width - i_button_width - i_margin)
+            i_button_y: int = max(i_margin, i_client_height - i_button_height - i_margin)
+            win32gui.MoveWindow(g_h_delete_toggle_button, i_button_x, i_button_y, i_button_width, i_button_height, True)
+        return 0
+
+    if i_message == win32con.WM_COMMAND:
+        i_control_id: int = win32api.LOWORD(w_param)
+        if i_control_id == DELETE_TOGGLE_BUTTON_ID:
+            g_b_delete_mode = not g_b_delete_mode
+            update_delete_toggle_button_caption(h_window)
+            return 0
 
     if i_message == win32con.WM_DROPFILES:
         on_drop_files(h_window, w_param)
@@ -179,7 +237,8 @@ def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) 
             psz_instruction_text: str = (
                 "配車カレンダーExcel(.xlsx)をこのウインドウへドラッグ＆ドロップしてください。\n"
                 "同じフォルダにTSVファイルを作成します。\n"
-                "エラー時は _error.txt を出力します。"
+                "エラー時は _error.txt を出力します。\n"
+                "右下の「削除」トグルがONのときは、Googleカレンダーから該当予定を削除します。"
             )
 
             win32gui.DrawText(h_device_context, psz_instruction_text, -1, obj_text_rect, i_draw_text_flags)
