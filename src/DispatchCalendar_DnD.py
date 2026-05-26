@@ -25,6 +25,7 @@ DELETE_TOGGLE_LABEL_OFF: str = "削除: OFF"
 DELETE_TOGGLE_LABEL_ON: str = "削除: ON"
 
 g_b_delete_mode: bool = False
+g_h_delete_toggle_button: int = 0
 
 
 def create_instruction_font() -> int:
@@ -149,17 +150,16 @@ def on_drop_files(h_window: int, h_drop: int) -> None:
 
 def update_delete_toggle_button_caption(h_window: int) -> None:
     """Update delete toggle button text from current mode."""
-    h_toggle_button: int = win32gui.GetDlgItem(h_window, DELETE_TOGGLE_BUTTON_ID)
-    if h_toggle_button == 0:
+    if g_h_delete_toggle_button == 0:
         return
 
     psz_button_text: str = DELETE_TOGGLE_LABEL_ON if g_b_delete_mode else DELETE_TOGGLE_LABEL_OFF
-    win32gui.SetWindowText(h_toggle_button, psz_button_text)
+    win32gui.SetWindowText(g_h_delete_toggle_button, psz_button_text)
 
 
 def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) -> int:
     """Main window procedure."""
-    global g_b_delete_mode
+    global g_b_delete_mode, g_h_delete_toggle_button
 
     if i_message == win32con.WM_CREATE:
         win32api.DragAcceptFiles(h_window, True)
@@ -170,7 +170,7 @@ def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) 
         obj_client_rect: tuple[int, int, int, int] = win32gui.GetClientRect(h_window)
         i_button_x: int = max(i_margin, obj_client_rect[2] - i_button_width - i_margin)
         i_button_y: int = max(i_margin, obj_client_rect[3] - i_button_height - i_margin)
-        win32gui.CreateWindowEx(
+        g_h_delete_toggle_button = win32gui.CreateWindowEx(
             0,
             "BUTTON",
             DELETE_TOGGLE_LABEL_OFF,
@@ -187,8 +187,7 @@ def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) 
         return 0
 
     if i_message == win32con.WM_SIZE:
-        h_toggle_button: int = win32gui.GetDlgItem(h_window, DELETE_TOGGLE_BUTTON_ID)
-        if h_toggle_button != 0:
+        if g_h_delete_toggle_button != 0:
             i_button_width = 120
             i_button_height = 34
             i_margin = 15
@@ -196,7 +195,7 @@ def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) 
             i_client_height: int = win32api.HIWORD(l_param)
             i_button_x: int = max(i_margin, i_client_width - i_button_width - i_margin)
             i_button_y: int = max(i_margin, i_client_height - i_button_height - i_margin)
-            win32gui.MoveWindow(h_toggle_button, i_button_x, i_button_y, i_button_width, i_button_height, True)
+            win32gui.MoveWindow(g_h_delete_toggle_button, i_button_x, i_button_y, i_button_width, i_button_height, True)
         return 0
 
     if i_message == win32con.WM_COMMAND:
