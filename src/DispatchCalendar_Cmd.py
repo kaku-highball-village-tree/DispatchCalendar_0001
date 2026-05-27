@@ -879,7 +879,6 @@ def main() -> int:
                 show_auto_close_info_dialog("カレンダーへの登録を開始します。")
                 i_registered_count, i_skipped_count = create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
                 print(f"Google Calendar events created: {i_registered_count}, skipped: {i_skipped_count}")
-                show_auto_close_info_dialog("カレンダーへの登録を完了しました。")
 
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
