@@ -876,7 +876,7 @@ def main() -> int:
                 print(f"Google Calendar events deleted: {i_deleted_count}, skipped: {i_skipped_count}")
             else:
                 show_auto_close_info_dialog("step0007.tsv を作成しました。")
-                show_auto_close_info_dialog("カレンダーへの登録を開始します。")
+                show_auto_close_info_dialog("カレンダーへの登録を開始します。", 5000)
                 i_registered_count, i_skipped_count = create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
                 print(f"Google Calendar events created: {i_registered_count}, skipped: {i_skipped_count}")
 

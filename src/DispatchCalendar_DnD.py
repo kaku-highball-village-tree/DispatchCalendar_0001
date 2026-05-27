@@ -81,6 +81,21 @@ def show_auto_close_info_message_box(psz_message_text: str, i_timeout_millisecon
         show_info_message_box(0, psz_message_text)
 
 
+def show_auto_close_info_message_box(psz_message_text: str, i_timeout_milliseconds: int = 10000) -> None:
+    """Show an information message box that auto-closes after timeout."""
+    try:
+        ctypes.windll.user32.MessageBoxTimeoutW(
+            0,
+            psz_message_text,
+            MESSAGE_BOX_TITLE,
+            win32con.MB_ICONINFORMATION | win32con.MB_OK,
+            0,
+            i_timeout_milliseconds,
+        )
+    except Exception:
+        show_info_message_box(0, psz_message_text)
+
+
 def get_cmd_script_path() -> Path:
     """Resolve CMD script path from this script directory."""
     obj_current_script_path: Path = Path(__file__).resolve()
@@ -244,6 +259,21 @@ def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) 
         obj_client_rect = win32gui.GetClientRect(h_window)
         layout_mode_radio_buttons(obj_client_rect[2], obj_client_rect[3])
         return 0
+
+    if i_message == win32con.WM_SIZE:
+        layout_mode_radio_buttons(win32api.LOWORD(l_param), win32api.HIWORD(l_param))
+        return 0
+
+    if i_message == win32con.WM_COMMAND:
+        i_control_id: int = win32api.LOWORD(w_param)
+        if i_control_id == MODE_RADIO_CREATE_ID:
+            g_b_delete_mode = False
+            update_mode_radio_buttons()
+            return 0
+        if i_control_id == MODE_RADIO_DELETE_ID:
+            g_b_delete_mode = True
+            update_mode_radio_buttons()
+            return 0
 
     if i_message == win32con.WM_SIZE:
         layout_mode_radio_buttons(win32api.LOWORD(l_param), win32api.HIWORD(l_param))
