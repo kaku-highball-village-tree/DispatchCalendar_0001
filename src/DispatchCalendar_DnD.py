@@ -156,66 +156,91 @@ def update_mode_radio_buttons() -> None:
     win32gui.SendMessage(g_h_mode_radio_delete, win32con.BM_SETCHECK, win32con.BST_CHECKED if g_b_delete_mode else win32con.BST_UNCHECKED, 0)
 
 
+def ensure_mode_radio_buttons(h_window: int) -> None:
+    """Create mode radio buttons once and keep them visible."""
+    global g_h_mode_radio_create, g_h_mode_radio_delete
+    if g_h_mode_radio_create != 0 and g_h_mode_radio_delete != 0:
+        return
+
+    h_instance: int = win32api.GetModuleHandle(None)
+    g_h_mode_radio_create = win32gui.CreateWindowEx(
+        0,
+        "BUTTON",
+        "登録",
+        win32con.WS_CHILD | win32con.WS_VISIBLE | win32con.WS_TABSTOP | win32con.BS_AUTORADIOBUTTON | win32con.WS_GROUP,
+        0,
+        0,
+        0,
+        0,
+        h_window,
+        MODE_RADIO_CREATE_ID,
+        h_instance,
+        None,
+    )
+    g_h_mode_radio_delete = win32gui.CreateWindowEx(
+        0,
+        "BUTTON",
+        "削除",
+        win32con.WS_CHILD | win32con.WS_VISIBLE | win32con.WS_TABSTOP | win32con.BS_AUTORADIOBUTTON,
+        0,
+        0,
+        0,
+        0,
+        h_window,
+        MODE_RADIO_DELETE_ID,
+        h_instance,
+        None,
+    )
+    update_mode_radio_buttons()
+
+
+def layout_mode_radio_buttons(i_client_width: int, i_client_height: int) -> None:
+    """Layout mode radio buttons at bottom-right."""
+    if g_h_mode_radio_create == 0 or g_h_mode_radio_delete == 0:
+        return
+
+    i_radio_width = 80
+    i_radio_height = 24
+    i_margin = 15
+    i_radio_gap = 8
+    i_group_width: int = i_radio_width * 2 + i_radio_gap
+    i_group_x: int = max(i_margin, i_client_width - i_group_width - i_margin)
+    i_group_y: int = max(i_margin, i_client_height - i_radio_height - i_margin)
+    win32gui.MoveWindow(g_h_mode_radio_create, i_group_x, i_group_y, i_radio_width, i_radio_height, True)
+    win32gui.MoveWindow(g_h_mode_radio_delete, i_group_x + i_radio_width + i_radio_gap, i_group_y, i_radio_width, i_radio_height, True)
+
+
 def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) -> int:
     """Main window procedure."""
     global g_b_delete_mode, g_h_mode_radio_create, g_h_mode_radio_delete
 
     if i_message == win32con.WM_CREATE:
         win32api.DragAcceptFiles(h_window, True)
-        h_instance: int = win32api.GetModuleHandle(None)
-        i_radio_width: int = 80
-        i_radio_height: int = 24
-        i_margin: int = 15
-        i_radio_gap: int = 8
+        ensure_mode_radio_buttons(h_window)
         obj_client_rect: tuple[int, int, int, int] = win32gui.GetClientRect(h_window)
-        i_group_width: int = i_radio_width * 2 + i_radio_gap
-        i_group_x: int = max(i_margin, obj_client_rect[2] - i_group_width - i_margin)
-        i_group_y: int = max(i_margin, obj_client_rect[3] - i_radio_height - i_margin)
-        g_h_mode_radio_create = win32gui.CreateWindowEx(
-            0,
-            "BUTTON",
-            "登録",
-            win32con.WS_CHILD | win32con.WS_VISIBLE | win32con.BS_AUTORADIOBUTTON | win32con.WS_GROUP,
-            i_group_x,
-            i_group_y,
-            i_radio_width,
-            i_radio_height,
-            h_window,
-            MODE_RADIO_CREATE_ID,
-            h_instance,
-            None,
-        )
-        g_h_mode_radio_delete = win32gui.CreateWindowEx(
-            0,
-            "BUTTON",
-            "削除",
-            win32con.WS_CHILD | win32con.WS_VISIBLE | win32con.BS_AUTORADIOBUTTON,
-            i_group_x + i_radio_width + i_radio_gap,
-            i_group_y,
-            i_radio_width,
-            i_radio_height,
-            h_window,
-            MODE_RADIO_DELETE_ID,
-            h_instance,
-            None,
-        )
-        update_mode_radio_buttons()
+        layout_mode_radio_buttons(obj_client_rect[2], obj_client_rect[3])
+        return 0
+
+    if i_message == win32con.WM_SHOWWINDOW:
+        ensure_mode_radio_buttons(h_window)
+        obj_client_rect = win32gui.GetClientRect(h_window)
+        layout_mode_radio_buttons(obj_client_rect[2], obj_client_rect[3])
         return 0
 
     if i_message == win32con.WM_SIZE:
-        if g_h_mode_radio_create != 0 and g_h_mode_radio_delete != 0:
-            i_radio_width = 80
-            i_radio_height = 24
-            i_margin = 15
-            i_radio_gap = 8
-            i_group_width: int = i_radio_width * 2 + i_radio_gap
-            i_client_width: int = win32api.LOWORD(l_param)
-            i_client_height: int = win32api.HIWORD(l_param)
-            i_group_x: int = max(i_margin, i_client_width - i_group_width - i_margin)
-            i_group_y: int = max(i_margin, i_client_height - i_radio_height - i_margin)
-            win32gui.MoveWindow(g_h_mode_radio_create, i_group_x, i_group_y, i_radio_width, i_radio_height, True)
-            win32gui.MoveWindow(g_h_mode_radio_delete, i_group_x + i_radio_width + i_radio_gap, i_group_y, i_radio_width, i_radio_height, True)
+        layout_mode_radio_buttons(win32api.LOWORD(l_param), win32api.HIWORD(l_param))
         return 0
+
+    if i_message == win32con.WM_COMMAND:
+        i_control_id: int = win32api.LOWORD(w_param)
+        if i_control_id == MODE_RADIO_CREATE_ID:
+            g_b_delete_mode = False
+            update_mode_radio_buttons()
+            return 0
+        if i_control_id == MODE_RADIO_DELETE_ID:
+            g_b_delete_mode = True
+            update_mode_radio_buttons()
+            return 0
 
     if i_message == win32con.WM_COMMAND:
         i_control_id: int = win32api.LOWORD(w_param)
