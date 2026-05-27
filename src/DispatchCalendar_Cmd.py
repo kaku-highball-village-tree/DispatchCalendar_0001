@@ -9,10 +9,23 @@ import sys
 import traceback
 import re
 import json
+import argparse
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from openpyxl import load_workbook
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+SCOPES: list[str] = ["https://www.googleapis.com/auth/calendar.events"]
+CREDENTIALS_FILE = Path("credentials") / "credentials.json"
+TOKEN_FILE = Path("token") / "token.json"
+TIME_ZONE = "Asia/Tokyo"
+CALENDAR_ID = "primary"
 
 
 def write_error_text(psz_excel_file_path: str, psz_error_message: str) -> str:
@@ -366,6 +379,391 @@ def create_step0002_outputs_from_step0001_tsv(psz_step0001_tsv_path: str) -> tup
     return str(obj_step0002_tsv_path), str(obj_step0002_json_path)
 
 
+
+
+def create_step0003_tsv_from_step0002_tsv(psz_step0002_tsv_path: str) -> str:
+    """Create step0003 TSV by removing columns 1-10 from step0002 TSV."""
+    obj_step0002_path: Path = Path(psz_step0002_tsv_path)
+    psz_output_stem: str = obj_step0002_path.stem[:-9] if obj_step0002_path.stem.endswith("_step0002") else obj_step0002_path.stem
+    obj_step0003_path: Path = obj_step0002_path.with_name(f"{psz_output_stem}_step0003.tsv")
+
+    with obj_step0002_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    list_output_lines: list[str] = []
+    for psz_line in list_lines:
+        list_columns: list[str] = psz_line.split("\t")
+        if len(list_columns) < 10:
+            raise ValueError("step0002 TSV row must have at least 10 columns")
+        list_output_lines.append("\t".join(list_columns[10:]))
+
+    with obj_step0003_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0003_path)
+
+def convert_japanese_era_date_text_to_iso(psz_work_date_text: str) -> str:
+    """Convert Japanese era style date text like '令和8年 5月 5日（火）' to ISO date (YYYY-MM-DD)."""
+    psz_normalized_text: str = psz_work_date_text
+    psz_normalized_text = psz_normalized_text.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    psz_normalized_text = re.sub(r"[\u3000\s]+", " ", psz_normalized_text).strip()
+    psz_normalized_text = re.sub(r"[（(][^)）]*[）)]", "", psz_normalized_text).strip()
+
+    obj_match: re.Match[str] | None = re.search(r"令和\s*(\d+)\s*年\s*(\d+)\s*月\s*(\d+)\s*日", psz_normalized_text)
+    if obj_match is not None:
+        i_reiwa_year: int = int(obj_match.group(1))
+        i_year: int = 2018 + i_reiwa_year
+        i_month: int = int(obj_match.group(2))
+        i_day: int = int(obj_match.group(3))
+        return f"{i_year:04d}-{i_month:02d}-{i_day:02d}"
+
+    obj_western_match: re.Match[str] | None = re.search(r"(\d{4})\s*年\s*(\d+)\s*月\s*(\d+)\s*日", psz_normalized_text)
+    if obj_western_match is not None:
+        i_year = int(obj_western_match.group(1))
+        i_month = int(obj_western_match.group(2))
+        i_day = int(obj_western_match.group(3))
+        return f"{i_year:04d}-{i_month:02d}-{i_day:02d}"
+
+    raise ValueError(f"Unable to parse work_date_text: {psz_work_date_text}")
+
+
+def create_step0004_tsv_from_step0003_tsv(psz_step0003_tsv_path: str) -> str:
+    """Create step0004 TSV by inserting work_date_iso column derived from work_date_text."""
+    obj_step0003_path: Path = Path(psz_step0003_tsv_path)
+    psz_output_stem: str = obj_step0003_path.stem[:-9] if obj_step0003_path.stem.endswith("_step0003") else obj_step0003_path.stem
+    obj_step0004_path: Path = obj_step0003_path.with_name(f"{psz_output_stem}_step0004.tsv")
+
+    with obj_step0003_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        with obj_step0004_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+            obj_output_file.write("")
+        return str(obj_step0004_path)
+
+    list_header_columns: list[str] = list_lines[0].split("\t")
+    if "work_date_text" not in list_header_columns:
+        raise ValueError("step0003 TSV must include work_date_text column")
+
+    i_work_date_text_index: int = list_header_columns.index("work_date_text")
+    i_insert_index: int = i_work_date_text_index + 1
+    list_output_lines: list[str] = []
+
+    list_new_header_columns: list[str] = list_header_columns[:]
+    list_new_header_columns.insert(i_insert_index, "work_date_iso")
+    list_output_lines.append("\t".join(list_new_header_columns))
+
+    for psz_data_line in list_lines[1:]:
+        list_columns: list[str] = psz_data_line.split("\t")
+        if len(list_columns) < len(list_header_columns):
+            list_columns.extend([""] * (len(list_header_columns) - len(list_columns)))
+
+        psz_work_date_text: str = list_columns[i_work_date_text_index]
+        psz_work_date_iso: str = ""
+        if psz_work_date_text.strip() != "":
+            psz_work_date_iso = convert_japanese_era_date_text_to_iso(psz_work_date_text)
+
+        list_columns.insert(i_insert_index, psz_work_date_iso)
+        list_output_lines.append("\t".join(list_columns))
+
+    with obj_step0004_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0004_path)
+
+
+def create_step0005_tsv_from_step0004_tsv(psz_step0004_tsv_path: str) -> str:
+    """Create step0005 TSV by trimming trailing tab-only empty cells from data rows."""
+    obj_step0004_path: Path = Path(psz_step0004_tsv_path)
+    psz_output_stem: str = obj_step0004_path.stem[:-9] if obj_step0004_path.stem.endswith("_step0004") else obj_step0004_path.stem
+    obj_step0005_path: Path = obj_step0004_path.with_name(f"{psz_output_stem}_step0005.tsv")
+
+    with obj_step0004_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        with obj_step0005_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+            obj_output_file.write("")
+        return str(obj_step0005_path)
+
+    list_output_lines: list[str] = [list_lines[0]]
+    for psz_data_line in list_lines[1:]:
+        list_output_lines.append(psz_data_line.rstrip("	"))
+
+    with obj_step0005_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0005_path)
+
+
+def create_step0006_tsv_from_step0005_tsv(psz_step0005_tsv_path: str) -> str:
+    """Create step0006 TSV by removing work_date_text column."""
+    obj_step0005_path: Path = Path(psz_step0005_tsv_path)
+    psz_output_stem: str = obj_step0005_path.stem[:-9] if obj_step0005_path.stem.endswith("_step0005") else obj_step0005_path.stem
+    obj_step0006_path: Path = obj_step0005_path.with_name(f"{psz_output_stem}_step0006.tsv")
+
+    with obj_step0005_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        with obj_step0006_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+            obj_output_file.write("")
+        return str(obj_step0006_path)
+
+    list_header_columns: list[str] = list_lines[0].split("\t")
+    if "work_date_text" not in list_header_columns:
+        raise ValueError("step0005 TSV must include work_date_text column")
+
+    i_work_date_text_index: int = list_header_columns.index("work_date_text")
+    list_output_lines: list[str] = []
+
+    for psz_line in list_lines:
+        list_columns: list[str] = psz_line.split("\t")
+        if i_work_date_text_index < len(list_columns):
+            del list_columns[i_work_date_text_index]
+        list_output_lines.append("\t".join(list_columns))
+
+    with obj_step0006_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0006_path)
+
+
+def create_step0007_tsv_from_step0006_tsv(psz_step0006_tsv_path: str) -> str:
+    """Create step0007 TSV by removing blank lines from step0006 TSV."""
+    obj_step0006_path: Path = Path(psz_step0006_tsv_path)
+    psz_output_stem: str = obj_step0006_path.stem[:-9] if obj_step0006_path.stem.endswith("_step0006") else obj_step0006_path.stem
+    obj_step0007_path: Path = obj_step0006_path.with_name(f"{psz_output_stem}_step0007.tsv")
+
+    with obj_step0006_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    list_output_lines: list[str] = []
+    for psz_line in list_lines:
+        if psz_line.strip() == "":
+            continue
+        list_output_lines.append(psz_line)
+
+    with obj_step0007_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
+        for psz_output_line in list_output_lines:
+            obj_output_file.write(psz_output_line + "\n")
+
+    return str(obj_step0007_path)
+
+
+def get_google_credentials() -> Credentials:
+    """Load credentials from token.json or run OAuth flow if needed."""
+    if not CREDENTIALS_FILE.exists():
+        raise FileNotFoundError("credentials/credentials.json が見つかりません。")
+
+    obj_credentials: Credentials | None = None
+    if TOKEN_FILE.exists():
+        try:
+            obj_credentials = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        except Exception:
+            obj_credentials = None
+
+    if not obj_credentials or not obj_credentials.valid:
+        if obj_credentials and obj_credentials.expired and obj_credentials.refresh_token:
+            try:
+                obj_credentials.refresh(Request())
+            except Exception:
+                obj_credentials = None
+
+        if not obj_credentials or not obj_credentials.valid:
+            obj_flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+            obj_credentials = obj_flow.run_local_server(port=0)
+
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TOKEN_FILE.write_text(obj_credentials.to_json(), encoding="utf-8")
+
+    return obj_credentials
+
+
+def create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) -> tuple[int, int]:
+    """Register events from step0007 TSV; skip invalid rows and write *_error.txt."""
+    obj_step0007_path: Path = Path(psz_step0007_tsv_path)
+    with obj_step0007_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        return 0, 0
+
+    list_header_columns: list[str] = list_lines[0].split("\t")
+    for psz_required_column in ["title_text", "body_text", "work_date_iso"]:
+        if psz_required_column not in list_header_columns:
+            raise ValueError(f"step0007 TSV must include {psz_required_column} column")
+
+    i_title_index: int = list_header_columns.index("title_text")
+    i_body_index: int = list_header_columns.index("body_text")
+    i_work_date_iso_index: int = list_header_columns.index("work_date_iso")
+
+    obj_service = build("calendar", "v3", credentials=get_google_credentials())
+
+    i_success_count: int = 0
+    i_skip_count: int = 0
+    list_skip_messages: list[str] = []
+
+    for i_line_number, psz_line in enumerate(list_lines[1:], start=2):
+        list_columns: list[str] = psz_line.split("\t")
+        if len(list_columns) <= max(i_title_index, i_body_index, i_work_date_iso_index):
+            i_skip_count += 1
+            list_skip_messages.append(f"line={i_line_number}, reason=required columns missing in row")
+            continue
+
+        psz_title: str = list_columns[i_title_index].strip()
+        psz_body: str = list_columns[i_body_index].replace("\\n", "\n").strip()
+        psz_work_date_iso: str = list_columns[i_work_date_iso_index].strip()
+
+        if psz_title == "":
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason=title_text is empty, work_date_iso={psz_work_date_iso}"
+            )
+            continue
+
+        if psz_work_date_iso == "":
+            i_skip_count += 1
+            list_skip_messages.append(f"line={i_line_number}, reason=work_date_iso is empty, title_text={psz_title}")
+            continue
+
+        try:
+            if "T" in psz_work_date_iso:
+                obj_start_datetime: datetime = datetime.fromisoformat(psz_work_date_iso)
+                obj_end_datetime: datetime = obj_start_datetime + timedelta(hours=1)
+                obj_event_body: dict[str, object] = {
+                    "summary": psz_title,
+                    "location": "",
+                    "description": psz_body,
+                    "start": {"dateTime": obj_start_datetime.isoformat(), "timeZone": TIME_ZONE},
+                    "end": {"dateTime": obj_end_datetime.isoformat(), "timeZone": TIME_ZONE},
+                }
+            else:
+                obj_start_date: datetime = datetime.strptime(psz_work_date_iso, "%Y-%m-%d")
+                obj_end_date: datetime = obj_start_date + timedelta(days=1)
+                obj_event_body = {
+                    "summary": psz_title,
+                    "location": "",
+                    "description": psz_body,
+                    "start": {"date": obj_start_date.strftime("%Y-%m-%d"), "timeZone": TIME_ZONE},
+                    "end": {"date": obj_end_date.strftime("%Y-%m-%d"), "timeZone": TIME_ZONE},
+                }
+
+            created_event = (
+                obj_service.events()
+                .insert(calendarId=CALENDAR_ID, body=obj_event_body)
+                .execute()
+            )
+            print(created_event.get("htmlLink", ""))
+            i_success_count += 1
+        except HttpError as obj_exception:
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason={obj_exception}, work_date_iso={psz_work_date_iso}, title_text={psz_title}"
+            )
+        except Exception as obj_exception:
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason={obj_exception}, work_date_iso={psz_work_date_iso}, title_text={psz_title}"
+            )
+
+    if len(list_skip_messages) > 0:
+        write_error_text(str(obj_step0007_path), "\n".join(list_skip_messages))
+
+    return i_success_count, i_skip_count
+
+
+def delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) -> tuple[int, int]:
+    """Delete matching events from step0007 TSV; skip invalid rows and write *_error.txt."""
+    obj_step0007_path: Path = Path(psz_step0007_tsv_path)
+    with obj_step0007_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
+        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
+
+    if len(list_lines) == 0:
+        return 0, 0
+
+    list_header_columns: list[str] = list_lines[0].split("\t")
+    for psz_required_column in ["title_text", "body_text", "work_date_iso"]:
+        if psz_required_column not in list_header_columns:
+            raise ValueError(f"step0007 TSV must include {psz_required_column} column")
+
+    i_title_index: int = list_header_columns.index("title_text")
+    i_body_index: int = list_header_columns.index("body_text")
+    i_work_date_iso_index: int = list_header_columns.index("work_date_iso")
+
+    obj_service = build("calendar", "v3", credentials=get_google_credentials())
+
+    i_deleted_count: int = 0
+    i_skip_count: int = 0
+    list_skip_messages: list[str] = []
+
+    for i_line_number, psz_line in enumerate(list_lines[1:], start=2):
+        list_columns: list[str] = psz_line.split("\t")
+        if len(list_columns) <= max(i_title_index, i_body_index, i_work_date_iso_index):
+            i_skip_count += 1
+            list_skip_messages.append(f"line={i_line_number}, reason=required columns missing in row")
+            continue
+
+        psz_title: str = list_columns[i_title_index].strip()
+        psz_body: str = list_columns[i_body_index].replace("\\n", "\n").strip()
+        psz_work_date_iso: str = list_columns[i_work_date_iso_index].strip()
+
+        if psz_title == "" or psz_work_date_iso == "":
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason=title_text/work_date_iso is empty, work_date_iso={psz_work_date_iso}"
+            )
+            continue
+
+        try:
+            if "T" in psz_work_date_iso:
+                obj_start_datetime: datetime = datetime.fromisoformat(psz_work_date_iso)
+                obj_time_min: datetime = obj_start_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
+            else:
+                obj_time_min = datetime.strptime(psz_work_date_iso, "%Y-%m-%d")
+            obj_time_max: datetime = obj_time_min + timedelta(days=1)
+
+            obj_response = (
+                obj_service.events()
+                .list(
+                    calendarId=CALENDAR_ID,
+                    timeMin=obj_time_min.isoformat() + "+09:00",
+                    timeMax=obj_time_max.isoformat() + "+09:00",
+                    singleEvents=True,
+                )
+                .execute()
+            )
+
+            list_items: list[dict[str, Any]] = obj_response.get("items", [])
+            for obj_item in list_items:
+                psz_summary: str = str(obj_item.get("summary", "")).strip()
+                psz_description: str = str(obj_item.get("description", "")).strip()
+                if psz_summary == psz_title and psz_description == psz_body:
+                    psz_event_id: str = str(obj_item.get("id", ""))
+                    if psz_event_id == "":
+                        continue
+                    obj_service.events().delete(calendarId=CALENDAR_ID, eventId=psz_event_id).execute()
+                    i_deleted_count += 1
+        except HttpError as obj_exception:
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason={obj_exception}, work_date_iso={psz_work_date_iso}, title_text={psz_title}"
+            )
+        except Exception as obj_exception:
+            i_skip_count += 1
+            list_skip_messages.append(
+                f"line={i_line_number}, reason={obj_exception}, work_date_iso={psz_work_date_iso}, title_text={psz_title}"
+            )
+
+    if len(list_skip_messages) > 0:
+        write_error_text(str(obj_step0007_path), "\n".join(list_skip_messages))
+
+    return i_deleted_count, i_skip_count
+
 def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
     """Convert active sheet of an Excel file to UTF-8 TSV with CRLF line endings."""
     obj_excel_path: Path = Path(psz_excel_file_path)
@@ -407,12 +805,17 @@ def convert_excel_to_tsv(psz_excel_file_path: str) -> str:
 
 def main() -> int:
     list_arguments: list[str] = sys.argv
-    if len(list_arguments) < 2:
+    obj_parser = argparse.ArgumentParser(add_help=False)
+    obj_parser.add_argument("--mode", choices=["create", "delete"], default="create")
+    obj_parser.add_argument("excel_file_paths", nargs="*")
+    obj_parsed = obj_parser.parse_args(list_arguments[1:])
+
+    if len(obj_parsed.excel_file_paths) < 1:
         psz_usage_message: str = "Usage: python DispatchCalendar_Cmd.py <excel_file_path1> [excel_file_path2 ...]"
         print(psz_usage_message)
         return 1
 
-    list_excel_file_paths: list[str] = list_arguments[1:]
+    list_excel_file_paths: list[str] = obj_parsed.excel_file_paths
     i_success_count: int = 0
     i_failure_count: int = 0
 
@@ -441,6 +844,23 @@ def main() -> int:
             psz_step0002_tsv_path, psz_step0002_json_path = create_step0002_outputs_from_step0001_tsv(psz_created_step_tsv_path)
             print(f"Step0002 TSV created: {psz_step0002_tsv_path}")
             print(f"Step0002 JSON created: {psz_step0002_json_path}")
+            psz_step0003_tsv_path: str = create_step0003_tsv_from_step0002_tsv(psz_step0002_tsv_path)
+            print(f"Step0003 TSV created: {psz_step0003_tsv_path}")
+            psz_step0004_tsv_path: str = create_step0004_tsv_from_step0003_tsv(psz_step0003_tsv_path)
+            print(f"Step0004 TSV created: {psz_step0004_tsv_path}")
+            psz_step0005_tsv_path: str = create_step0005_tsv_from_step0004_tsv(psz_step0004_tsv_path)
+            print(f"Step0005 TSV created: {psz_step0005_tsv_path}")
+            psz_step0006_tsv_path: str = create_step0006_tsv_from_step0005_tsv(psz_step0005_tsv_path)
+            print(f"Step0006 TSV created: {psz_step0006_tsv_path}")
+            psz_step0007_tsv_path: str = create_step0007_tsv_from_step0006_tsv(psz_step0006_tsv_path)
+            print(f"Step0007 TSV created: {psz_step0007_tsv_path}")
+            if obj_parsed.mode == "delete":
+                i_deleted_count, i_skipped_count = delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
+                print(f"Google Calendar events deleted: {i_deleted_count}, skipped: {i_skipped_count}")
+            else:
+                i_registered_count, i_skipped_count = create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
+                print(f"Google Calendar events created: {i_registered_count}, skipped: {i_skipped_count}")
+
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001
             psz_traceback_text: str = traceback.format_exc()
