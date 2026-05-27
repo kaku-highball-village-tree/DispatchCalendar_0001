@@ -260,6 +260,78 @@ def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) 
             update_mode_radio_buttons()
             return 0
 
+    if i_message == win32con.WM_SHOWWINDOW:
+        ensure_mode_radio_buttons(h_window)
+        obj_client_rect = win32gui.GetClientRect(h_window)
+        layout_mode_radio_buttons(obj_client_rect[2], obj_client_rect[3])
+        return 0
+
+    if i_message == win32con.WM_SIZE:
+        layout_mode_radio_buttons(win32api.LOWORD(l_param), win32api.HIWORD(l_param))
+        return 0
+
+    if i_message == win32con.WM_COMMAND:
+        i_control_id: int = win32api.LOWORD(w_param)
+        if i_control_id == MODE_RADIO_CREATE_ID:
+            g_b_delete_mode = False
+            update_mode_radio_buttons()
+            return 0
+        if i_control_id == MODE_RADIO_DELETE_ID:
+            g_b_delete_mode = True
+            update_mode_radio_buttons()
+            return 0
+
+    if i_message == win32con.WM_SHOWWINDOW:
+        ensure_mode_radio_buttons(h_window)
+        obj_client_rect = win32gui.GetClientRect(h_window)
+        layout_mode_radio_buttons(obj_client_rect[2], obj_client_rect[3])
+        return 0
+
+    if i_message == win32con.WM_SIZE:
+        layout_mode_radio_buttons(win32api.LOWORD(l_param), win32api.HIWORD(l_param))
+        return 0
+
+    if i_message == win32con.WM_COMMAND:
+        i_control_id: int = win32api.LOWORD(w_param)
+        if i_control_id == MODE_RADIO_CREATE_ID:
+            g_b_delete_mode = False
+            update_mode_radio_buttons()
+            return 0
+        if i_control_id == MODE_RADIO_DELETE_ID:
+            g_b_delete_mode = True
+            update_mode_radio_buttons()
+            return 0
+
+    if i_message == win32con.WM_COMMAND:
+        i_control_id: int = win32api.LOWORD(w_param)
+        if i_control_id == MODE_RADIO_CREATE_ID:
+            g_b_delete_mode = False
+            update_mode_radio_buttons()
+            return 0
+        if i_control_id == MODE_RADIO_DELETE_ID:
+            g_b_delete_mode = True
+            update_mode_radio_buttons()
+            return 0
+
+    if i_message == win32con.WM_SIZE:
+        if g_h_delete_toggle_button != 0:
+            i_button_width = 120
+            i_button_height = 34
+            i_margin = 15
+            i_client_width: int = win32api.LOWORD(l_param)
+            i_client_height: int = win32api.HIWORD(l_param)
+            i_button_x: int = max(i_margin, i_client_width - i_button_width - i_margin)
+            i_button_y: int = max(i_margin, i_client_height - i_button_height - i_margin)
+            win32gui.MoveWindow(g_h_delete_toggle_button, i_button_x, i_button_y, i_button_width, i_button_height, True)
+        return 0
+
+    if i_message == win32con.WM_COMMAND:
+        i_control_id: int = win32api.LOWORD(w_param)
+        if i_control_id == DELETE_TOGGLE_BUTTON_ID:
+            g_b_delete_mode = not g_b_delete_mode
+            update_delete_toggle_button_caption(h_window)
+            return 0
+
     if i_message == win32con.WM_DROPFILES:
         on_drop_files(h_window, w_param)
         return 0
