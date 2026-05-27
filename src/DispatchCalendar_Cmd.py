@@ -10,6 +10,7 @@ import traceback
 import re
 import json
 import argparse
+import ctypes
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ CREDENTIALS_FILE = Path("credentials") / "credentials.json"
 TOKEN_FILE = Path("token") / "token.json"
 TIME_ZONE = "Asia/Tokyo"
 CALENDAR_ID = "primary"
+DIALOG_TITLE = "DispatchCalendar DnD"
 
 
 def write_error_text(psz_excel_file_path: str, psz_error_message: str) -> str:
@@ -38,6 +40,21 @@ def write_error_text(psz_excel_file_path: str, psz_error_message: str) -> str:
         obj_error_file.write(psz_error_message)
 
     return str(obj_error_file_path)
+
+
+def show_auto_close_info_dialog(psz_message_text: str, i_timeout_milliseconds: int = 10000) -> None:
+    """Show an OK information dialog that auto-closes after timeout."""
+    try:
+        ctypes.windll.user32.MessageBoxTimeoutW(
+            0,
+            psz_message_text,
+            DIALOG_TITLE,
+            0x00000040,  # MB_ICONINFORMATION
+            0,
+            i_timeout_milliseconds,
+        )
+    except Exception:
+        return
 
 
 def normalize_line_breaks_and_trim(psz_text: str) -> str:
@@ -858,8 +875,11 @@ def main() -> int:
                 i_deleted_count, i_skipped_count = delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
                 print(f"Google Calendar events deleted: {i_deleted_count}, skipped: {i_skipped_count}")
             else:
+                show_auto_close_info_dialog("step0007.tsv を作成しました。")
+                show_auto_close_info_dialog("カレンダーへの登録を開始します。")
                 i_registered_count, i_skipped_count = create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path)
                 print(f"Google Calendar events created: {i_registered_count}, skipped: {i_skipped_count}")
+                show_auto_close_info_dialog("カレンダーへの登録を完了しました。")
 
             i_success_count += 1
         except Exception as obj_exception:  # noqa: BLE001

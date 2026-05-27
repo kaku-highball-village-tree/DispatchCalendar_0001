@@ -242,6 +242,27 @@ def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) 
             update_mode_radio_buttons()
             return 0
 
+    if i_message == win32con.WM_SHOWWINDOW:
+        ensure_mode_radio_buttons(h_window)
+        obj_client_rect = win32gui.GetClientRect(h_window)
+        layout_mode_radio_buttons(obj_client_rect[2], obj_client_rect[3])
+        return 0
+
+    if i_message == win32con.WM_SIZE:
+        layout_mode_radio_buttons(win32api.LOWORD(l_param), win32api.HIWORD(l_param))
+        return 0
+
+    if i_message == win32con.WM_COMMAND:
+        i_control_id: int = win32api.LOWORD(w_param)
+        if i_control_id == MODE_RADIO_CREATE_ID:
+            g_b_delete_mode = False
+            update_mode_radio_buttons()
+            return 0
+        if i_control_id == MODE_RADIO_DELETE_ID:
+            g_b_delete_mode = True
+            update_mode_radio_buttons()
+            return 0
+
     if i_message == win32con.WM_COMMAND:
         i_control_id: int = win32api.LOWORD(w_param)
         if i_control_id == MODE_RADIO_CREATE_ID:
