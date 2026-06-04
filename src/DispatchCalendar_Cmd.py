@@ -27,6 +27,7 @@ CREDENTIALS_FILE = Path("credentials") / "credentials.json"
 TOKEN_FILE = Path("token") / "token.json"
 TIME_ZONE = "Asia/Tokyo"
 CALENDAR_ID = "primary"
+GOOGLE_CALENDAR_ID_FILE = Path("google_calendar_id.txt")
 DIALOG_TITLE = "DispatchCalendar DnD"
 
 
@@ -572,6 +573,20 @@ def create_step0007_tsv_from_step0006_tsv(psz_step0006_tsv_path: str) -> str:
     return str(obj_step0007_path)
 
 
+def load_google_calendar_id() -> str:
+    """Load target Google Calendar ID from google_calendar_id.txt, or use primary when absent/blank."""
+    if not GOOGLE_CALENDAR_ID_FILE.exists() or not GOOGLE_CALENDAR_ID_FILE.is_file():
+        return CALENDAR_ID
+
+    with GOOGLE_CALENDAR_ID_FILE.open(mode="r", encoding="utf-8", newline="") as obj_calendar_id_file:
+        for psz_line in obj_calendar_id_file:
+            psz_calendar_id: str = psz_line.strip()
+            if psz_calendar_id != "":
+                return psz_calendar_id
+
+    return CALENDAR_ID
+
+
 def get_google_credentials() -> Credentials:
     """Load credentials from token.json or run OAuth flow if needed."""
     if not CREDENTIALS_FILE.exists():
@@ -620,6 +635,7 @@ def create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
     i_work_date_iso_index: int = list_header_columns.index("work_date_iso")
 
     obj_service = build("calendar", "v3", credentials=get_google_credentials())
+    psz_calendar_id: str = load_google_calendar_id()
 
     i_success_count: int = 0
     i_skip_count: int = 0
@@ -672,7 +688,7 @@ def create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
 
             created_event = (
                 obj_service.events()
-                .insert(calendarId=CALENDAR_ID, body=obj_event_body)
+                .insert(calendarId=psz_calendar_id, body=obj_event_body)
                 .execute()
             )
             print(created_event.get("htmlLink", ""))
@@ -713,6 +729,7 @@ def delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
     i_work_date_iso_index: int = list_header_columns.index("work_date_iso")
 
     obj_service = build("calendar", "v3", credentials=get_google_credentials())
+    psz_calendar_id: str = load_google_calendar_id()
 
     i_deleted_count: int = 0
     i_skip_count: int = 0
@@ -747,7 +764,7 @@ def delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
             obj_response = (
                 obj_service.events()
                 .list(
-                    calendarId=CALENDAR_ID,
+                    calendarId=psz_calendar_id,
                     timeMin=obj_time_min.isoformat() + "+09:00",
                     timeMax=obj_time_max.isoformat() + "+09:00",
                     singleEvents=True,
@@ -763,7 +780,7 @@ def delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
                     psz_event_id: str = str(obj_item.get("id", ""))
                     if psz_event_id == "":
                         continue
-                    obj_service.events().delete(calendarId=CALENDAR_ID, eventId=psz_event_id).execute()
+                    obj_service.events().delete(calendarId=psz_calendar_id, eventId=psz_event_id).execute()
                     i_deleted_count += 1
         except HttpError as obj_exception:
             i_skip_count += 1
