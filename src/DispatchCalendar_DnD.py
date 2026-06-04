@@ -66,6 +66,33 @@ def show_info_message_box(h_window: int, psz_message_text: str) -> None:
     win32api.MessageBox(h_window, psz_message_text, MESSAGE_BOX_TITLE, win32con.MB_ICONINFORMATION | win32con.MB_OK)
 
 
+def show_delete_confirmation_message_box(h_window: int) -> bool:
+    """Show delete confirmation and return True only when user selects OK."""
+    psz_message_text: str = "現在「削除」が選択されています。対象の予定をGoogleカレンダーから削除します。続行しますか？"
+    i_flags: int = (
+        win32con.MB_ICONWARNING
+        | win32con.MB_OKCANCEL
+        | win32con.MB_DEFBUTTON2
+    )
+    i_result: int = win32api.MessageBox(h_window, psz_message_text, MESSAGE_BOX_TITLE, i_flags)
+    return i_result == win32con.IDOK
+
+
+def show_auto_close_info_message_box(psz_message_text: str, i_timeout_milliseconds: int = 10000) -> None:
+    """Show an information message box that auto-closes after timeout."""
+    try:
+        ctypes.windll.user32.MessageBoxTimeoutW(
+            0,
+            psz_message_text,
+            MESSAGE_BOX_TITLE,
+            win32con.MB_ICONINFORMATION | win32con.MB_OK,
+            0,
+            i_timeout_milliseconds,
+        )
+    except Exception:
+        show_info_message_box(0, psz_message_text)
+
+
 def show_auto_close_info_message_box(psz_message_text: str, i_timeout_milliseconds: int = 10000) -> None:
     """Show an information message box that auto-closes after timeout."""
     try:
@@ -178,6 +205,10 @@ def on_drop_files(h_window: int, h_drop: int) -> None:
         show_error_message_box(h_window, "Excelファイル(.xlsx)のみ受け付けます。")
         return
 
+    if g_b_delete_mode:
+        if not show_delete_confirmation_message_box(h_window):
+            return
+
     run_cmd_converter(h_window, list_excel_file_paths, g_b_delete_mode)
 
 
@@ -253,6 +284,27 @@ def window_procedure(h_window: int, i_message: int, w_param: int, l_param: int) 
         obj_client_rect: tuple[int, int, int, int] = win32gui.GetClientRect(h_window)
         layout_mode_radio_buttons(obj_client_rect[2], obj_client_rect[3])
         return 0
+
+    if i_message == win32con.WM_SHOWWINDOW:
+        ensure_mode_radio_buttons(h_window)
+        obj_client_rect = win32gui.GetClientRect(h_window)
+        layout_mode_radio_buttons(obj_client_rect[2], obj_client_rect[3])
+        return 0
+
+    if i_message == win32con.WM_SIZE:
+        layout_mode_radio_buttons(win32api.LOWORD(l_param), win32api.HIWORD(l_param))
+        return 0
+
+    if i_message == win32con.WM_COMMAND:
+        i_control_id: int = win32api.LOWORD(w_param)
+        if i_control_id == MODE_RADIO_CREATE_ID:
+            g_b_delete_mode = False
+            update_mode_radio_buttons()
+            return 0
+        if i_control_id == MODE_RADIO_DELETE_ID:
+            g_b_delete_mode = True
+            update_mode_radio_buttons()
+            return 0
 
     if i_message == win32con.WM_SHOWWINDOW:
         ensure_mode_radio_buttons(h_window)

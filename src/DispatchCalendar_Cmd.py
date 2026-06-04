@@ -27,6 +27,7 @@ CREDENTIALS_FILE = Path("credentials") / "credentials.json"
 TOKEN_FILE = Path("token") / "token.json"
 TIME_ZONE = "Asia/Tokyo"
 CALENDAR_ID = "primary"
+GOOGLE_CALENDAR_ID_FILE = Path("google_calendar_id.txt")
 DIALOG_TITLE = "DispatchCalendar DnD"
 
 
@@ -231,96 +232,6 @@ def create_step0001_tsv_from_tsv(psz_tsv_file_path: str) -> str:
     return str(obj_step_tsv_path)
 
 
-
-def create_step0001_5_tsv_from_step0001_tsv(psz_step0001_tsv_path: str) -> str:
-    """Create step0001_5 TSV by expanding horizontal work slots into vertical work sets."""
-    obj_step0001_path: Path = Path(psz_step0001_tsv_path)
-    psz_step_stem: str = obj_step0001_path.stem
-    psz_output_stem: str = psz_step_stem[:-9] if psz_step_stem.endswith("_step0001") else psz_step_stem
-    obj_step0001_5_path: Path = obj_step0001_path.with_name(f"{psz_output_stem}_step0001_5.tsv")
-
-    with obj_step0001_path.open(mode="r", encoding="utf-8", newline="") as obj_input_file:
-        list_lines: list[str] = [psz_line.rstrip("\r\n") for psz_line in obj_input_file]
-
-    if len(list_lines) <= 2:
-        with obj_step0001_5_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
-            for psz_line in list_lines:
-                obj_output_file.write(psz_line + "\n")
-        return str(obj_step0001_5_path)
-
-    list_output_lines: list[str] = list_lines[:2]
-    list_current_group_rows: list[list[str]] = []
-    psz_current_name: str = ""
-    psz_current_car_no: str = ""
-    psz_last_car_no: str = ""
-
-    def normalize_step0001_5_row(psz_line: str) -> list[str]:
-        list_columns: list[str] = psz_line.split("\t")
-        if len(list_columns) < 8:
-            list_columns.extend([""] * (8 - len(list_columns)))
-        return list_columns
-
-    def flush_current_group() -> None:
-        nonlocal list_current_group_rows, psz_current_name, psz_current_car_no
-        if len(list_current_group_rows) == 0:
-            return
-
-        for i_slot_index in range(2, 8):
-            list_slot_values: list[str] = []
-            for list_group_row in list_current_group_rows:
-                psz_slot_value: str = ""
-                if i_slot_index < len(list_group_row):
-                    psz_slot_value = list_group_row[i_slot_index]
-                list_slot_values.append(psz_slot_value)
-
-            b_is_empty_slot: bool = all(normalize_line_breaks_and_trim(psz_value) == "" for psz_value in list_slot_values)
-            if b_is_empty_slot:
-                break
-
-            list_output_lines.append("\t".join([psz_current_name, psz_current_car_no, list_slot_values[0]]))
-            for psz_continuation_value in list_slot_values[1:]:
-                if normalize_line_breaks_and_trim(psz_continuation_value) == "":
-                    continue
-                list_output_lines.append("\t".join(["", "", psz_continuation_value]))
-
-        list_current_group_rows = []
-        psz_current_name = ""
-        psz_current_car_no = ""
-
-    for psz_line in list_lines[2:]:
-        list_columns = normalize_step0001_5_row(psz_line)
-        psz_name: str = list_columns[0].strip()
-        psz_car_no: str = list_columns[1].strip()
-        list_slot_values: list[str] = [list_columns[i].strip() for i in range(2, 8)]
-        b_is_blank_row: bool = psz_name == "" and psz_car_no == "" and all(psz_slot_value == "" for psz_slot_value in list_slot_values)
-        if b_is_blank_row:
-            continue
-
-        if psz_name != "":
-            flush_current_group()
-            psz_current_name = psz_name
-            psz_current_car_no = psz_car_no if psz_car_no != "" else psz_last_car_no
-            if psz_current_car_no != "":
-                psz_last_car_no = psz_current_car_no
-            list_current_group_rows.append(list_columns)
-            continue
-
-        if len(list_current_group_rows) == 0:
-            continue
-
-        if psz_car_no != "":
-            psz_current_car_no = psz_car_no
-            psz_last_car_no = psz_car_no
-        list_current_group_rows.append(list_columns)
-
-    flush_current_group()
-
-    with obj_step0001_5_path.open(mode="w", encoding="utf-8", newline="\r\n") as obj_output_file:
-        for psz_output_line in list_output_lines:
-            obj_output_file.write(psz_output_line + "\n")
-
-    return str(obj_step0001_5_path)
-
 def parse_step0001_tsv_to_calendar_records(psz_step0001_tsv_path: str) -> list[dict[str, Any]]:
     """Parse step0001 TSV into per-person calendar records."""
     obj_step0001_tsv_path: Path = Path(psz_step0001_tsv_path)
@@ -424,15 +335,10 @@ def parse_step0001_tsv_to_calendar_records(psz_step0001_tsv_path: str) -> list[d
 
 
 def create_step0002_outputs_from_step0001_tsv(psz_step0001_tsv_path: str) -> tuple[str, str]:
-    """Create step0002 TSV and JSON (NDJSON) from step0001 or step0001_5 TSV."""
+    """Create step0002 TSV and JSON (NDJSON) from step0001 TSV."""
     obj_step0001_tsv_path: Path = Path(psz_step0001_tsv_path)
     psz_step_stem: str = obj_step0001_tsv_path.stem
-    if psz_step_stem.endswith("_step0001_5"):
-        psz_output_stem: str = psz_step_stem[:-11]
-    elif psz_step_stem.endswith("_step0001"):
-        psz_output_stem = psz_step_stem[:-9]
-    else:
-        psz_output_stem = psz_step_stem
+    psz_output_stem: str = psz_step_stem[:-9] if psz_step_stem.endswith("_step0001") else psz_step_stem
 
     obj_step0002_tsv_path: Path = obj_step0001_tsv_path.with_name(f"{psz_output_stem}_step0002.tsv")
     obj_step0002_json_path: Path = obj_step0001_tsv_path.with_name(f"{psz_output_stem}_step0002.json")
@@ -667,6 +573,20 @@ def create_step0007_tsv_from_step0006_tsv(psz_step0006_tsv_path: str) -> str:
     return str(obj_step0007_path)
 
 
+def load_google_calendar_id() -> str:
+    """Load target Google Calendar ID from google_calendar_id.txt, or use primary when absent/blank."""
+    if not GOOGLE_CALENDAR_ID_FILE.exists() or not GOOGLE_CALENDAR_ID_FILE.is_file():
+        return CALENDAR_ID
+
+    with GOOGLE_CALENDAR_ID_FILE.open(mode="r", encoding="utf-8", newline="") as obj_calendar_id_file:
+        for psz_line in obj_calendar_id_file:
+            psz_calendar_id: str = psz_line.strip()
+            if psz_calendar_id != "":
+                return psz_calendar_id
+
+    return CALENDAR_ID
+
+
 def get_google_credentials() -> Credentials:
     """Load credentials from token.json or run OAuth flow if needed."""
     if not CREDENTIALS_FILE.exists():
@@ -715,6 +635,7 @@ def create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
     i_work_date_iso_index: int = list_header_columns.index("work_date_iso")
 
     obj_service = build("calendar", "v3", credentials=get_google_credentials())
+    psz_calendar_id: str = load_google_calendar_id()
 
     i_success_count: int = 0
     i_skip_count: int = 0
@@ -767,7 +688,7 @@ def create_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
 
             created_event = (
                 obj_service.events()
-                .insert(calendarId=CALENDAR_ID, body=obj_event_body)
+                .insert(calendarId=psz_calendar_id, body=obj_event_body)
                 .execute()
             )
             print(created_event.get("htmlLink", ""))
@@ -808,6 +729,7 @@ def delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
     i_work_date_iso_index: int = list_header_columns.index("work_date_iso")
 
     obj_service = build("calendar", "v3", credentials=get_google_credentials())
+    psz_calendar_id: str = load_google_calendar_id()
 
     i_deleted_count: int = 0
     i_skip_count: int = 0
@@ -842,7 +764,7 @@ def delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
             obj_response = (
                 obj_service.events()
                 .list(
-                    calendarId=CALENDAR_ID,
+                    calendarId=psz_calendar_id,
                     timeMin=obj_time_min.isoformat() + "+09:00",
                     timeMax=obj_time_max.isoformat() + "+09:00",
                     singleEvents=True,
@@ -858,7 +780,7 @@ def delete_google_calendar_events_from_step0007_tsv(psz_step0007_tsv_path: str) 
                     psz_event_id: str = str(obj_item.get("id", ""))
                     if psz_event_id == "":
                         continue
-                    obj_service.events().delete(calendarId=CALENDAR_ID, eventId=psz_event_id).execute()
+                    obj_service.events().delete(calendarId=psz_calendar_id, eventId=psz_event_id).execute()
                     i_deleted_count += 1
         except HttpError as obj_exception:
             i_skip_count += 1
@@ -953,9 +875,7 @@ def main() -> int:
             print(f"TSV created: {psz_created_tsv_path}")
             psz_created_step_tsv_path: str = create_step0001_tsv_from_tsv(psz_created_tsv_path)
             print(f"Step TSV created: {psz_created_step_tsv_path}")
-            psz_step0001_5_tsv_path: str = create_step0001_5_tsv_from_step0001_tsv(psz_created_step_tsv_path)
-            print(f"Step0001.5 TSV created: {psz_step0001_5_tsv_path}")
-            psz_step0002_tsv_path, psz_step0002_json_path = create_step0002_outputs_from_step0001_tsv(psz_step0001_5_tsv_path)
+            psz_step0002_tsv_path, psz_step0002_json_path = create_step0002_outputs_from_step0001_tsv(psz_created_step_tsv_path)
             print(f"Step0002 TSV created: {psz_step0002_tsv_path}")
             print(f"Step0002 JSON created: {psz_step0002_json_path}")
             psz_step0003_tsv_path: str = create_step0003_tsv_from_step0002_tsv(psz_step0002_tsv_path)
